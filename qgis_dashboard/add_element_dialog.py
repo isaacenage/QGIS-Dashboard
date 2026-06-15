@@ -7,7 +7,7 @@ configuration panels — enough to bind data and see the dashboard work.
 """
 
 from qgis.PyQt.QtWidgets import (
-    QDialog, QFormLayout, QComboBox, QLineEdit, QDialogButtonBox
+    QDialog, QFormLayout, QComboBox, QLineEdit, QDialogButtonBox, QCheckBox
 )
 from qgis.gui import QgsMapLayerComboBox, QgsFieldComboBox
 from qgis.core import QgsMapLayerProxyModel
@@ -58,8 +58,10 @@ class AddElementDialog(QDialog):
         # insert before the button row
         self.form.insertRow(self.form.rowCount() - 1, label, widget)
 
-    def _field_combo(self):
+    def _field_combo(self, allow_empty=False):
         c = QgsFieldComboBox()
+        if allow_empty:
+            c.setAllowEmptyFieldName(True)
         c.setLayer(self.layer_combo.currentLayer())
         return c
 
@@ -81,6 +83,18 @@ class AddElementDialog(QDialog):
             stat.addItems(["count", "sum", "mean"])
             self._add_dyn("statistic", "Statistic", stat)
             self._add_dyn("value_field", "Value field (sum/mean)", self._field_combo())
+        elif t == "pivot":
+            self._add_dyn("row_field", "Row field", self._field_combo())
+            self._add_dyn("col_field", "Column field (optional)",
+                          self._field_combo(allow_empty=True))
+            stat = QComboBox()
+            stat.addItems(["count", "sum", "mean", "min", "max"])
+            self._add_dyn("statistic", "Statistic", stat)
+            self._add_dyn("value_field", "Value field (sum/mean/min/max)",
+                          self._field_combo())
+            chk = QCheckBox()
+            chk.setChecked(True)
+            self._add_dyn("show_totals", "Show totals", chk)
         elif t == "category_selector":
             self._add_dyn("category_field", "Category field", self._field_combo())
         elif t == "list":
@@ -100,6 +114,8 @@ class AddElementDialog(QDialog):
         for key, w in self._dyn.items():
             if isinstance(w, QgsFieldComboBox):
                 cfg[key] = w.currentField()
+            elif isinstance(w, QCheckBox):
+                cfg[key] = w.isChecked()
             elif isinstance(w, QComboBox):
                 data = w.currentData()
                 cfg[key] = data if data is not None else w.currentText()

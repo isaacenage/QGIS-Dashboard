@@ -3,6 +3,7 @@
 
 from .indicator import IndicatorElement
 from .chart import ChartElement
+from .pivot import PivotElement
 from .list_element import ListElement
 from .map_element import MapElement
 from .category_selector import CategorySelectorElement
@@ -11,6 +12,7 @@ ELEMENT_TYPES = {
     cls.type_name: cls for cls in (
         IndicatorElement,
         ChartElement,
+        PivotElement,
         ListElement,
         MapElement,
         CategorySelectorElement,
@@ -21,6 +23,7 @@ ELEMENT_TYPES = {
 ELEMENT_LABELS = {
     "indicator": "Indicator",
     "chart": "Chart",
+    "pivot": "Pivot / matrix",
     "list": "List",
     "map": "Map (live canvas)",
     "category_selector": "Category selector",

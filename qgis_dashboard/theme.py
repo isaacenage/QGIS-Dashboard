@@ -145,6 +145,15 @@ QScrollArea {{ background:{window_bg}; border:none; }}
 #indTop, #indBottom {{ color:{muted}; {small_font} }}
 QLabel {{ color:{text}; {base_font} background:transparent; }}
 QToolButton {{ color:{text}; }}
+QTableWidget, QTableView {{
+    background:{surface_bg}; color:{text}; gridline-color:{border};
+    border:none; {base_font}
+}}
+QHeaderView::section {{
+    background:{window_bg}; color:{text}; padding:3px 6px;
+    border:none; border-right:1px solid {border}; border-bottom:1px solid {border};
+}}
+QTableCornerButton::section {{ background:{window_bg}; border:none; }}
 """.format(
             chrome_bg=self.chrome_bg, window_bg=self.window_bg,
             surface_bg=self.surface_bg, border=self.border, radius=self.radius,

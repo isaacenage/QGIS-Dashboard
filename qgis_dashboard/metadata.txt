@@ -1,16 +1,17 @@
 # This file contains metadata for your plugin.
+# This file should be included when you package your plugin.
 
-# This file should be included when you package your plugin.# Mandatory items:
+# Mandatory items:
 
 [general]
 name=QGIS Dashboard
-qgisMinimumVersion=3.4
-description=QGIS Dashboard that enables users to create their own customized dashboards
+qgisMinimumVersion=3.22
+description=Build ArcGIS-Dashboards-style interactive dashboards from your QGIS project layers — indicators, charts, lists, a live map element, and cross-filtering selectors all wired together through a signal bus.
 version=0.1
 author=Isaac Enage
 email=isaacenagework@gmail.com
 
-about=QGIS Dashboard
+about=An interactive dashboard builder for QGIS. Add data-driven elements (indicator, serial/bar chart, pie/donut chart, list) bound to vector layers via the QGIS expression engine, plus a live map element and a category selector that cross-filters every other element. Layout and configuration persist inside the .qgz project file.
 
 tracker=http://bugs
 repository=http://repo
@@ -23,13 +24,13 @@ hasProcessingProvider=no
 # changelog=
 
 # Tags are comma separated with spaces allowed
-tags=python
+tags=dashboard,charts,analytics,indicator,selector,visualization
 
 homepage=http://homepage
-category=Web
+category=Plugins
 icon=icon.png
 # experimental flag
-experimental=False
+experimental=True
 
 # deprecated flag (applies to the whole plugin, not just a single version)
 deprecated=False
@@ -39,9 +40,8 @@ deprecated=False
 # Check the documentation for more information.
 # plugin_dependencies=
 
-Category of the plugin: Raster, Vector, Database or Web
+# Category of the plugin: Raster, Vector, Database or Web
 # category=
 
 # If the plugin can run on QGIS Server.
 server=False
-

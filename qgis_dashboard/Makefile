@@ -38,19 +38,21 @@ LOCALES =
 # translation
 SOURCES = \
 	__init__.py \
-	qgis_dashboard.py qgis_dashboard_dialog.py
+	qgis_dashboard.py window.py bus.py theme.py dashboard_canvas.py page_view.py \
+	add_element_dialog.py settings_dialog.py appearance_dialog.py connections_dialog.py
 
 PLUGINNAME = qgis_dashboard
 
 PY_FILES = \
 	__init__.py \
-	qgis_dashboard.py qgis_dashboard_dialog.py
+	qgis_dashboard.py window.py bus.py theme.py dashboard_canvas.py page_view.py \
+	add_element_dialog.py settings_dialog.py appearance_dialog.py connections_dialog.py
 
-UI_FILES = qgis_dashboard_dialog_base.ui
+UI_FILES =
 
 EXTRAS = metadata.txt icon.png
 
-EXTRA_DIRS =
+EXTRA_DIRS = elements
 
 COMPILED_RESOURCE_FILES = resources.py
 

@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Packaged plugin zips
+*.zip
+
+# QGIS / editor cruft
+*.qgs~
+.idea/
+.vscode/
+
+# Reference copy of the upstream Summarizer project (not part of this repo)
+Summarizer-main/

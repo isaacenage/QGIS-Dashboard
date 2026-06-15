@@ -15,7 +15,7 @@ painted so the otherwise-invisible snap grid is discoverable.
 
 from qgis.PyQt.QtCore import Qt, QRect, QPoint, QPointF, pyqtSignal
 from qgis.PyQt.QtGui import QPainter, QColor
-from qgis.PyQt.QtWidgets import QWidget, QFrame, QVBoxLayout, QToolButton
+from qgis.PyQt.QtWidgets import QWidget, QFrame, QVBoxLayout, QToolButton, QMenu
 
 GAP = 4              # px gutter between tiles
 HEADER_H = 20        # px drag strip height
@@ -126,14 +126,18 @@ class _ResizeHandle(QWidget):
 class GridTile(QFrame):
     """A draggable / resizable container wrapping one dashboard element."""
 
-    closeRequested = pyqtSignal(object)   # emits the wrapped element
-    styleRequested = pyqtSignal(object)   # emits the wrapped element
-    geometryCommitted = pyqtSignal()      # grid rect changed (persist)
+    closeRequested = pyqtSignal(object)        # emits the wrapped element
+    styleRequested = pyqtSignal(object)        # emits the wrapped element
+    connectionsRequested = pyqtSignal(object)  # emits the wrapped element
+    geometryCommitted = pyqtSignal()           # grid rect changed (persist)
 
     def __init__(self, canvas, element, grid_rect):
         super().__init__(canvas)
         self.canvas = canvas
         self.element = element
+        # back-reference so full-bleed elements (e.g. the map) can drive their
+        # own move via the tile API — see elements/map_element._TileMapCanvas
+        setattr(element, "_grid_tile", self)
         self.gx, self.gy, self.gw, self.gh = grid_rect
         self._prev = grid_rect
         self.setObjectName("tileWrap")
@@ -166,6 +170,18 @@ class GridTile(QFrame):
         self._handles = {edge: _ResizeHandle(self, edge)
                          for edge in ("n", "s", "e", "w",
                                       "nw", "ne", "sw", "se")}
+
+    def contextMenuEvent(self, event):
+        """Right-click a tile to edit its connections / appearance / removal."""
+        menu = QMenu(self)
+        menu.addAction("Connections…").triggered.connect(
+            lambda: self.connectionsRequested.emit(self.element))
+        menu.addAction("Tile appearance…").triggered.connect(
+            lambda: self.styleRequested.emit(self.element))
+        menu.addSeparator()
+        menu.addAction("Remove tile").triggered.connect(
+            lambda: self.closeRequested.emit(self.element))
+        menu.exec_(event.globalPos())
 
     def grid_rect(self):
         return (self.gx, self.gy, self.gw, self.gh)
@@ -247,7 +263,8 @@ class GridTile(QFrame):
 class DashboardCanvas(QWidget):
     """Holds GridTiles and enforces the snap grid."""
 
-    layoutChanged = pyqtSignal()   # a tile moved/resized/added/removed
+    layoutChanged = pyqtSignal()         # a tile moved/resized/added/removed
+    gridSettingsRequested = pyqtSignal()  # user asked to edit the snap grid
 
     def __init__(self, bus, cols=12, rows=8, parent=None):
         super().__init__(parent)
@@ -260,6 +277,15 @@ class DashboardCanvas(QWidget):
         self.setMinimumSize(480, 360)
         if bus is not None:
             bus.themeChanged.connect(self.update)
+
+    # ---- context menu ----
+
+    def contextMenuEvent(self, event):
+        """Right-click the canvas to edit the (global) snap-grid resolution."""
+        menu = QMenu(self)
+        menu.addAction("Grid settings…").triggered.connect(
+            self.gridSettingsRequested.emit)
+        menu.exec_(event.globalPos())
 
     # ---- geometry helpers ----
 

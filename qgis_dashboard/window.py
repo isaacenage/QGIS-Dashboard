@@ -18,7 +18,7 @@ import json
 import uuid
 
 from qgis.PyQt.QtWidgets import (
-    QMainWindow, QToolBar, QLabel, QWidget, QSizePolicy,
+    QMainWindow, QLabel, QWidget, QFrame, QHBoxLayout,
     QTabBar, QStackedWidget, QVBoxLayout, QMessageBox, QInputDialog, QMenu,
 )
 from qgis.PyQt.QtCore import Qt, pyqtSignal
@@ -26,13 +26,16 @@ from qgis.core import QgsProject
 
 from .bus import DashboardBus
 from .theme import Theme
+from .fonts import ensure_fonts_registered
+from .icons import logo_icon
+from .sidebar import Sidebar
 from .dashboard_canvas import DashboardCanvas
 from .page_view import PageView
 from .elements import create_element
 from .add_element_dialog import AddElementDialog
-from .settings_dialog import GridSettingsDialog
+from .settings_dialog import GridSettingsDialog, SettingsDialog
 from .appearance_dialog import AppearanceDialog
-from .connections_dialog import ConnectionsDialog
+from .connections_dialog import ElementConnectionsDialog
 
 PROJECT_SCOPE = "QgisDashboard"
 PROJECT_KEY = "layout"
@@ -106,8 +109,10 @@ class DashboardWindow(QMainWindow):
 
     def __init__(self, iface, parent=None):
         super().__init__(parent)
+        ensure_fonts_registered()   # register bundled Inter before any QSS/font use
         self.iface = iface
         self.setWindowTitle("QGIS Dashboard")
+        self.setWindowIcon(logo_icon())
         self.setWindowFlags(Qt.Window)
         self.resize(1100, 720)
 
@@ -120,12 +125,21 @@ class DashboardWindow(QMainWindow):
         self._tab_bar.setExpanding(False)
         self._stack = QStackedWidget()
 
-        container = QWidget()
-        col = QVBoxLayout(container)
+        # left icon rail + (tabs over page stack)
+        self._build_sidebar()
+        pages_col = QWidget()
+        col = QVBoxLayout(pages_col)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(0)
         col.addWidget(self._tab_bar)
         col.addWidget(self._stack, 1)
+
+        container = QWidget()
+        row = QHBoxLayout(container)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+        row.addWidget(self.sidebar)
+        row.addWidget(pages_col, 1)
         self.setCentralWidget(container)
 
         self._tab_bar.currentChanged.connect(self._on_tab_changed)
@@ -134,7 +148,7 @@ class DashboardWindow(QMainWindow):
         self._tab_bar.setContextMenuPolicy(Qt.CustomContextMenu)
         self._tab_bar.customContextMenuRequested.connect(self._tab_context_menu)
 
-        self._build_toolbar()
+        self._build_status_bar()
         self._apply_window_style()
 
         self.add_page("Page 1")
@@ -145,36 +159,59 @@ class DashboardWindow(QMainWindow):
         QgsProject.instance().layersRemoved.connect(
             lambda *_: self.bus.layersChanged.emit())
         self.bus.filtersChanged.connect(self._update_filter_label)
-        self.bus.themeChanged.connect(self._apply_window_style)
+        self.bus.filtersCleared.connect(self._update_filter_label)
+        self.bus.themeChanged.connect(self._on_theme_changed)
 
     # ---- chrome ----
 
-    def _build_toolbar(self):
-        tb = QToolBar("Dashboard", self)
-        tb.setMovable(False)
-        self.addToolBar(tb)
-        for text, slot in (
-            ("Add element", self.add_element_dialog),
-            ("Add page", self._add_page_interactive),
-            ("Connections…", self.open_connections),
-            ("Appearance…", self.open_appearance),
-            ("Grid…", self.open_grid_settings),
-            ("Clear filter", self.bus.clear_all_filters),
-        ):
-            tb.addAction(text).triggered.connect(slot)
-        tb.addSeparator()
-        tb.addAction("Zoom −").triggered.connect(
-            lambda: self.current_view() and self.current_view().zoom_out())
-        tb.addAction("100%").triggered.connect(
-            lambda: self.current_view() and self.current_view().reset_zoom())
-        tb.addAction("Zoom +").triggered.connect(
-            lambda: self.current_view() and self.current_view().zoom_in())
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        tb.addWidget(spacer)
+    def _build_sidebar(self):
+        """Vertical icon rail replacing the old horizontal toolbar."""
+        self.sidebar = Sidebar(self.bus.theme, self)
+        self.sidebar.add_action(
+            "add_element", "Add element", self.add_element_dialog)
+        self.sidebar.add_action(
+            "add_page", "Add page", self._add_page_interactive)
+        self.sidebar.add_separator()
+        self.sidebar.add_action(
+            "zoom_out", "Zoom out", self._zoom_out)
+        self.sidebar.add_action(
+            "zoom_reset", "Reset zoom (100%)", self._zoom_reset)
+        self.sidebar.add_action("zoom_in", "Zoom in", self._zoom_in)
+        self.sidebar.add_stretch()
+        self.sidebar.add_action(
+            "clear_filter", "Clear filter", self.bus.clear_all_filters)
+        self.sidebar.add_separator()
+        # Settings hub (Appearance, About) lives at the foot of the rail.
+        self.sidebar.add_action("settings", "Settings", self.open_settings)
+
+    def _build_status_bar(self):
+        """Bottom status strip carrying the live cross-filter indicator."""
+        bar = self.statusBar()
+        self._filter_dot = QFrame()
+        self._filter_dot.setObjectName("dashFilterDot")
+        self._filter_dot.setFixedSize(8, 8)
+        self._filter_dot.hide()
         self.filter_label = QLabel("No active filter")
-        self.filter_label.setStyleSheet("color:#6b7682; padding:0 8px;")
-        tb.addWidget(self.filter_label)
+        self.filter_label.setObjectName("dashFilterStatus")
+        bar.addWidget(self._filter_dot)
+        bar.addWidget(self.filter_label)
+
+    # ---- zoom helpers (act on the current page's view) ----
+
+    def _zoom_in(self):
+        view = self.current_view()
+        if view is not None:
+            view.zoom_in()
+
+    def _zoom_out(self):
+        view = self.current_view()
+        if view is not None:
+            view.zoom_out()
+
+    def _zoom_reset(self):
+        view = self.current_view()
+        if view is not None:
+            view.reset_zoom()
 
     def _apply_window_style(self):
         self.setStyleSheet(self.bus.theme.window_qss())
@@ -182,10 +219,15 @@ class DashboardWindow(QMainWindow):
         if cur is not None:
             cur.update()
 
+    def _on_theme_changed(self):
+        self.sidebar.apply_theme(self.bus.theme)
+        self._apply_window_style()
+
     def _update_filter_label(self):
         n = self.bus.active_filter_count()
         self.filter_label.setText(
             "No active filter" if n == 0 else "Filters active: {}".format(n))
+        self._filter_dot.setVisible(n > 0)
 
     # ---- pages ----
 
@@ -213,6 +255,7 @@ class DashboardWindow(QMainWindow):
     def add_page(self, title, page_id=None, make_active=True):
         page_id = page_id or uuid.uuid4().hex[:8]
         canvas = DashboardCanvas(self.bus, self.canvas_cols(), self.canvas_rows())
+        canvas.gridSettingsRequested.connect(self.open_grid_settings)
         view = PageView(canvas)
         page = DashboardPage(page_id, title, view)
         self._pages.append(page)
@@ -220,6 +263,7 @@ class DashboardWindow(QMainWindow):
         self._tab_bar.addTab(title)
         if make_active:
             self._tab_bar.setCurrentIndex(len(self._pages) - 1)
+        self._update_tabbar_visibility()
         return page
 
     def delete_page(self, page_id):
@@ -243,6 +287,15 @@ class DashboardWindow(QMainWindow):
         self._stack.removeWidget(page.view)
         page.view.deleteLater()
         self._tab_bar.removeTab(idx)
+        self._update_tabbar_visibility()
+
+    def _update_tabbar_visibility(self):
+        """Hide the page tab bar unless there's more than one page.
+
+        A single-page dashboard then reads as just the rail + canvas; the tab
+        bar only appears once a second page exists (via "Add page").
+        """
+        self._tab_bar.setVisible(len(self._pages) > 1)
 
     def _add_page_interactive(self):
         self.add_page("Page {}".format(len(self._pages) + 1))
@@ -306,6 +359,7 @@ class DashboardWindow(QMainWindow):
         element = create_element(type_name, self.bus, config, page.canvas)
         tile = page.canvas.add_tile(element, grid_rect)
         tile.styleRequested.connect(self._edit_tile_style)
+        tile.connectionsRequested.connect(self._edit_tile_connections)
         return tile
 
     def _edit_tile_style(self, element):
@@ -321,10 +375,14 @@ class DashboardWindow(QMainWindow):
 
     # ---- dialogs ----
 
-    def open_connections(self):
-        dlg = ConnectionsDialog(self.bus, self.elements(), self)
+    def _edit_tile_connections(self, element):
+        dlg = ElementConnectionsDialog(self.bus, element, self.elements(), self)
         if dlg.exec_():
             dlg.apply()
+
+    def open_settings(self):
+        dlg = SettingsDialog(self.open_appearance, self)
+        dlg.exec_()
 
     def open_appearance(self):
         original = self.bus.theme
@@ -360,6 +418,7 @@ class DashboardWindow(QMainWindow):
         self._pages = []
         while self._tab_bar.count():
             self._tab_bar.removeTab(0)
+        self._update_tabbar_visibility()
         self.bus.clear_all_filters()
 
     # ---- persistence into the .qgz project ----

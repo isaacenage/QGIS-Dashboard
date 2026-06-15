@@ -90,6 +90,183 @@ class BusPageLocalTest(unittest.TestCase):
         self.assertIsNone(bus.combined_filter_for("tgt"))
         self.assertEqual(bus.active_filter_count(), 0)
 
+    def test_sources_of_is_reverse_lookup(self):
+        bus = DashboardBus()
+        bus.set_active_page("A")
+        bus.set_targets("s1", ["t", "x"])
+        bus.set_targets("s2", ["t"])
+        self.assertEqual(bus.sources_of("t"), {"s1", "s2"})
+        self.assertEqual(bus.sources_of("x"), {"s1"})
+        self.assertEqual(bus.sources_of("none"), set())
+
+    def test_set_connected_toggles_single_edge(self):
+        bus = DashboardBus()
+        bus.set_active_page("A")
+        bus.set_targets("s", ["a", "b"])
+        bus.set_connected("s", "c", True)
+        self.assertEqual(bus.targets_of("s"), {"a", "b", "c"})
+        bus.set_connected("s", "a", False)
+        self.assertEqual(bus.targets_of("s"), {"b", "c"})
+        bus.set_connected("s", "s", True)        # self-edge is ignored
+        self.assertNotIn("s", bus.targets_of("s"))
+
+
+class _FakeElement(object):
+    """Minimal stand-in for a DashboardElement (the dialog only reads these)."""
+
+    def __init__(self, eid, is_source, accepts):
+        self.id = eid
+        self.is_filter_source = is_source
+        self.accepts_filter = accepts
+
+    def display_name(self):
+        return self.id
+
+
+class ElementConnectionsDialogTest(unittest.TestCase):
+    """The per-element connections dialog edits both directions in place."""
+
+    def _setup(self, focus):
+        from connections_dialog import ElementConnectionsDialog
+        bus = DashboardBus()
+        bus.set_active_page("A")
+        # chart: both roles; selector: source only; indicator: target only
+        chart = _FakeElement("chart", True, True)
+        selector = _FakeElement("sel", True, False)
+        indicator = _FakeElement("ind", False, True)
+        elements = [chart, selector, indicator]
+        focus_el = {"chart": chart, "sel": selector, "ind": indicator}[focus]
+        dlg = ElementConnectionsDialog(bus, focus_el, elements)
+        return bus, dlg
+
+    def test_both_sections_present_for_dual_role_tile(self):
+        bus, dlg = self._setup("chart")
+        # outgoing target candidate: indicator; incoming source candidate: sel
+        self.assertIn(("ind", "out"), dlg._checks)
+        self.assertIn(("sel", "in"), dlg._checks)
+        # chart never wires to itself
+        self.assertNotIn(("chart", "out"), dlg._checks)
+
+    def test_apply_writes_outgoing_and_incoming_edges(self):
+        bus, dlg = self._setup("chart")
+        dlg._checks[("ind", "out")].setChecked(True)   # chart filters indicator
+        dlg._checks[("sel", "in")].setChecked(True)    # selector filters chart
+        dlg.apply()
+        self.assertTrue(bus.is_connected("chart", "ind"))
+        self.assertTrue(bus.is_connected("sel", "chart"))
+
+    def test_source_only_tile_shows_no_incoming_section(self):
+        bus, dlg = self._setup("sel")
+        self.assertTrue(any(d == "out" for _, d in dlg._checks))
+        self.assertFalse(any(d == "in" for _, d in dlg._checks))
+
+    def test_apply_can_clear_an_existing_edge(self):
+        bus, dlg = self._setup("ind")
+        bus.set_targets("sel", ["ind"])               # pre-existing sel → ind
+        # rebuild so the checkbox reflects the existing edge
+        from connections_dialog import ElementConnectionsDialog
+        dlg = ElementConnectionsDialog(
+            bus, _FakeElement("ind", False, True),
+            [_FakeElement("sel", True, False), _FakeElement("ind", False, True)])
+        self.assertTrue(dlg._checks[("sel", "in")].isChecked())
+        dlg._checks[("sel", "in")].setChecked(False)
+        dlg.apply()
+        self.assertFalse(bus.is_connected("sel", "ind"))
+
+
+class TextElementTest(unittest.TestCase):
+    """The presentational text/heading container."""
+
+    def _bus(self):
+        bus = DashboardBus()
+        bus.set_active_page("A")
+        return bus
+
+    def test_factory_creates_text_element(self):
+        from elements import create_element
+        from elements.text_element import TextElement
+        el = create_element("text", self._bus(), {"text": "Hi"})
+        self.assertIsInstance(el, TextElement)
+
+    def test_takes_no_part_in_cross_filtering(self):
+        from elements import create_element
+        el = create_element("text", self._bus(), {})
+        self.assertFalse(el.is_filter_source)
+        self.assertFalse(el.accepts_filter)
+
+    def test_renders_text_and_alignment(self):
+        from elements import create_element
+        from qgis.PyQt.QtCore import Qt
+        el = create_element("text", self._bus(),
+                            {"text": "Heading", "align": "center"})
+        self.assertEqual(el._label.text(), "Heading")
+        self.assertTrue(el._label.alignment() & Qt.AlignHCenter)
+
+    def test_empty_text_shows_placeholder(self):
+        from elements import create_element
+        from elements.text_element import _PLACEHOLDER
+        el = create_element("text", self._bus(), {"text": ""})
+        self.assertEqual(el._label.text(), _PLACEHOLDER)
+
+
+class ImageElementTest(unittest.TestCase):
+    def _bus(self):
+        bus = DashboardBus()
+        bus.set_active_page("A")
+        return bus
+
+    def test_is_full_bleed_presentational(self):
+        from elements import create_element
+        from elements.image_element import ImageElement
+        el = create_element("image", self._bus(), {})
+        self.assertIsInstance(el, ImageElement)
+        self.assertTrue(el.full_bleed)
+        self.assertFalse(el.is_filter_source)
+        self.assertFalse(el.accepts_filter)
+
+    def test_no_path_shows_placeholder(self):
+        from elements import create_element
+        el = create_element("image", self._bus(), {})
+        self.assertIn("No image", el._label.text())
+
+    def test_missing_file_is_reported(self):
+        from elements import create_element
+        el = create_element("image", self._bus(),
+                            {"path": "/no/such/file.png"})
+        self.assertIn("not found", el._label.text())
+
+
+class AddElementDialogTest(unittest.TestCase):
+    """Dynamic config rows for the new layerless tiles."""
+
+    def _select(self, dlg, type_name):
+        i = dlg.type_combo.findData(type_name)
+        dlg.type_combo.setCurrentIndex(i)
+
+    def test_text_hides_layer_row_and_returns_config(self):
+        from add_element_dialog import AddElementDialog
+        dlg = AddElementDialog()
+        self._select(dlg, "indicator")
+        self.assertFalse(dlg.layer_combo.isHidden())   # data tile shows layer
+        self._select(dlg, "text")
+        self.assertTrue(dlg.layer_combo.isHidden())     # layerless tile hides it
+        dlg._dyn["text"].setPlainText("Title here")
+        t, cfg = dlg.result_config()
+        self.assertEqual(t, "text")
+        self.assertEqual(cfg["text"], "Title here")
+        self.assertIn("align", cfg)
+        self.assertNotIn("layer_id", cfg)
+
+    def test_image_returns_path_and_fit(self):
+        from add_element_dialog import AddElementDialog
+        dlg = AddElementDialog()
+        self._select(dlg, "image")
+        dlg._dyn["path"]._edit.setText("C:/pics/logo.svg")
+        t, cfg = dlg.result_config()
+        self.assertEqual(t, "image")
+        self.assertEqual(cfg["path"], "C:/pics/logo.svg")
+        self.assertEqual(cfg["fit"], "contain")
+
 
 class ZoomTest(unittest.TestCase):
     def test_clamp_zoom_bounds(self):
@@ -200,7 +377,9 @@ class ThemeChromeTest(unittest.TestCase):
         qss = Theme.default().window_qss()
         self.assertIn("QMainWindow", qss)
         self.assertIn("QTabBar::tab", qss)
-        self.assertIn("QToolBar", qss)
+        # the horizontal toolbar was replaced by the left icon rail + status bar
+        self.assertIn("#dashSidebar", qss)
+        self.assertIn("QStatusBar", qss)
 
     def test_chrome_bg_round_trips(self):
         t = Theme.default().with_values(chrome_bg="#101010")

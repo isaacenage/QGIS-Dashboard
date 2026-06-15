@@ -7,6 +7,8 @@ from .pivot import PivotElement
 from .list_element import ListElement
 from .map_element import MapElement
 from .category_selector import CategorySelectorElement
+from .text_element import TextElement
+from .image_element import ImageElement
 
 ELEMENT_TYPES = {
     cls.type_name: cls for cls in (
@@ -16,6 +18,8 @@ ELEMENT_TYPES = {
         ListElement,
         MapElement,
         CategorySelectorElement,
+        TextElement,
+        ImageElement,
     )
 }
 
@@ -27,6 +31,8 @@ ELEMENT_LABELS = {
     "list": "List",
     "map": "Map (live canvas)",
     "category_selector": "Category selector",
+    "text": "Text / heading",
+    "image": "Image",
 }
 
 

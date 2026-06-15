@@ -14,29 +14,33 @@ container chrome is styled through ``Theme.window_qss`` / ``tile_qss``.
 
 import copy
 
-# Modern, clean default palette (Fluent-ish blues on a cool neutral canvas).
+# "Modern analytics" default palette (Summarizer design system, blue brand).
+# A cool neutral canvas, white surfaces, hairline borders, one strong accent.
 DEFAULT_SERIES = [
-    "#0f6cbd", "#13a10e", "#c19c00", "#d13438", "#8764b8",
+    "#2b7de9", "#13a10e", "#c19c00", "#d13438", "#8764b8",
     "#00b7c3", "#ca5010", "#498205", "#a4262c", "#5c2e91",
 ]
 
 _DEFAULTS = {
     "chrome_bg": "#ffffff",   # window / toolbar / tab-bar chrome (light by default,
                               # independent of the QGIS application theme)
-    "window_bg": "#f4f6f8",   # canvas drawing-area background (editable)
+    "window_bg": "#fafafa",   # canvas drawing-area background (editable)
     "surface_bg": "#ffffff",  # tile background
-    "text": "#1b2733",        # primary foreground
-    "text_muted": "#6b7682",  # secondary foreground
-    "accent": "#0f6cbd",      # highlights, indicator value
-    "border": "#d9dee3",      # tile border / grid lines
+    "text": "#252b33",        # primary foreground
+    "text_muted": "#55606d",  # secondary foreground
+    "accent": "#2b7de9",      # brand: highlights, indicator value, primary buttons
+                              # (the hover/pressed shade is derived from this)
+    "border": "#e2e6ec",      # tile border / hairlines / grid lines
     "chart_bg": "#ffffff",    # plot area background
     "grid_line": "#c4ccd4",   # snap-grid dots
+    "zebra": "#f6f8fb",       # alternating table row
+    "selection": "#e5e7eb",   # selected table row / text selection
     "series": list(DEFAULT_SERIES),
-    "font_family": "",        # "" => inherit the application default font
+    "font_family": "Inter",   # bundled UI font (see fonts.py); falls back gracefully
     "font_size": 11,
     "title_size": 13,
     "value_size": 30,         # indicator big number
-    "radius": 8,              # tile corner radius (px)
+    "radius": 12,             # tile / surface corner radius (px)
 }
 
 # Keys a per-element override is allowed to set (a tile can't move the window).
@@ -99,42 +103,78 @@ class Theme(object):
         pal = self.series or DEFAULT_SERIES
         return pal[index % len(pal)]
 
+    # Fallbacks appended after the chosen family so the UI degrades gracefully
+    # when the bundled Inter font is unavailable.
+    _FONT_FALLBACK = '"Segoe UI", "Helvetica Neue", Arial, sans-serif'
+
+    def font_stack(self):
+        """The CSS font-family stack: the chosen family then safe fallbacks."""
+        fam = self.font_family or "Inter"
+        return '"{}", {}'.format(fam, self._FONT_FALLBACK)
+
     def _font_rule(self, size=None):
-        fam = 'font-family:"{}";'.format(self.font_family) if self.font_family else ""
+        fam = "font-family:{};".format(self.font_stack())
         sz = "font-size:{}px;".format(size) if size else ""
         return fam + sz
 
     # ---- stylesheets ----
 
     def window_qss(self):
-        """Stylesheet for the whole dashboard window.
+        """Stylesheet for the whole dashboard window (and its child dialogs).
 
-        Explicitly styles the chrome (window, toolbar, tab bar, scroll areas)
-        with the theme's own light colors so the dashboard does **not** inherit
-        the QGIS application palette (which may be dark).
+        Explicitly styles the chrome (window, rail, tab bar, scroll areas) plus
+        every common control — buttons, inputs, tabs, tables, scrollbars,
+        tooltips — with the theme's own light "modern analytics" colors, so the
+        dashboard does **not** inherit the QGIS application palette (which may
+        be dark). Adapted from the Summarizer design system.
         """
         return """
-QMainWindow {{ background:{chrome_bg}; }}
-QToolBar {{ background:{chrome_bg}; border:none; spacing:2px; padding:3px; }}
-QToolBar QToolButton {{
-    color:{text}; background:transparent; padding:4px 9px; border-radius:5px;
+* {{ font-family:{font_family}; }}
+QMainWindow, QDialog {{ background:{chrome_bg}; }}
+QWidget {{ color:{text}; }}
+QFrame {{ border:none; background:transparent; }}
+
+/* Left navigation rail --------------------------------------------------- */
+#dashSidebar {{ background:{chrome_bg}; border-right:1px solid {border}; }}
+#dashSidebarLogo {{ background:transparent; }}
+#dashRailSep {{ background:{border}; border:none; }}
+QToolButton#dashRailButton {{
+    background:transparent; border:1px solid transparent; border-radius:8px;
 }}
-QToolBar QToolButton:hover {{ background:{window_bg}; }}
-QToolBar::separator {{ background:{border}; width:1px; margin:4px 4px; }}
+QToolButton#dashRailButton:hover {{ background:{brand_soft}; border-color:{border}; }}
+QToolButton#dashRailButton:pressed {{ background:{selection}; }}
+QToolButton#dashRailButton:focus {{ border-color:{accent}; }}
+
+/* Status bar ------------------------------------------------------------- */
+QStatusBar {{ background:{chrome_bg}; border-top:1px solid {border}; }}
+QStatusBar::item {{ border:none; }}
+#dashFilterStatus {{ color:{muted}; {small_font} background:transparent; }}
+#dashFilterDot {{ background:{accent}; border-radius:4px; }}
+
+/* Page tabs (bottom-accent underline) ------------------------------------ */
 QTabBar {{ background:{chrome_bg}; }}
 QTabBar::tab {{
-    background:{window_bg}; color:{text}; padding:5px 12px;
-    border:1px solid {border}; border-bottom:none;
-    border-top-left-radius:6px; border-top-right-radius:6px; margin-right:2px;
+    background:transparent; color:{muted}; padding:8px 16px; margin-right:2px;
+    border:none; border-bottom:3px solid transparent; font-weight:500;
 }}
-QTabBar::tab:selected {{ background:{surface_bg}; color:{accent}; }}
+QTabBar::tab:hover {{ color:{text}; }}
+QTabBar::tab:selected {{
+    color:{accent}; font-weight:600; border-bottom:3px solid {accent};
+    background:{brand_soft};
+    border-top-left-radius:8px; border-top-right-radius:8px;
+}}
 QStackedWidget {{ background:{chrome_bg}; }}
 QScrollArea {{ background:{window_bg}; border:none; }}
 #dashCanvas {{ background:{window_bg}; }}
+
+/* Tiles ------------------------------------------------------------------ */
 #dashboardElement {{
     background:{surface_bg}; border:1px solid {border};
     border-radius:{radius}px;
 }}
+/* full-bleed tiles (e.g. the live map) fill edge-to-edge: square corners so a
+   rectangular child aligns with the frame, and no inner background bleed. */
+#dashboardElement[fullBleed="true"] {{ border-radius:0; }}
 #tileHeader {{ background:transparent; }}
 #tileTitle {{ color:{text}; {title_font} font-weight:600; }}
 #tileClose {{ color:{muted}; border:none; background:transparent; }}
@@ -144,25 +184,130 @@ QScrollArea {{ background:{window_bg}; border:none; }}
 #indValue {{ color:{accent}; font-size:{value_size}px; font-weight:700; }}
 #indTop, #indBottom {{ color:{muted}; {small_font} }}
 QLabel {{ color:{text}; {base_font} background:transparent; }}
+
+/* Buttons ---------------------------------------------------------------- */
+QPushButton {{
+    min-height:32px; padding:7px 16px; border-radius:10px;
+    border:1px solid transparent; font-weight:600; {base_font}
+    background:{accent}; color:#ffffff;
+}}
+QPushButton:hover {{ background:{accent_hover}; }}
+QPushButton:pressed {{ background:{accent_hover}; border-color:{accent_hover}; }}
+QPushButton:disabled {{ background:{border}; color:{muted}; }}
+QPushButton[variant="secondary"] {{
+    background:{surface_bg}; border:1px solid {border}; color:{text};
+}}
+QPushButton[variant="secondary"]:hover {{
+    border-color:{accent}; background:{brand_soft};
+}}
+QPushButton[variant="ghost"] {{
+    background:transparent; border:none; color:{accent};
+}}
+QPushButton[variant="ghost"]:hover {{ background:{brand_soft}; }}
+/* In a dialog button box, only the default (e.g. OK) reads as primary; the
+   rest (Cancel/Apply/Clear) fall back to a quiet secondary pill. */
+QDialogButtonBox QPushButton {{
+    background:{surface_bg}; border:1px solid {border}; color:{text};
+}}
+QDialogButtonBox QPushButton:hover {{ border-color:{accent}; background:{brand_soft}; }}
+QDialogButtonBox QPushButton:default {{
+    background:{accent}; border-color:{accent}; color:#ffffff;
+}}
+QDialogButtonBox QPushButton:default:hover {{
+    background:{accent_hover}; border-color:{accent_hover};
+}}
+
+/* Inputs ----------------------------------------------------------------- */
+QLineEdit, QComboBox, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox {{
+    background:{surface_bg}; border:1px solid {border}; border-radius:8px;
+    color:{text}; padding:5px 9px; min-height:28px;
+    selection-background-color:{selection}; selection-color:{text};
+}}
+QLineEdit:focus, QComboBox:focus, QPlainTextEdit:focus, QTextEdit:focus,
+QSpinBox:focus, QDoubleSpinBox:focus {{ border:1px solid {accent}; }}
+QComboBox::drop-down {{ width:22px; border:none; background:transparent; }}
+QComboBox QAbstractItemView {{
+    background:{surface_bg}; color:{text}; border:1px solid {border};
+    selection-background-color:{selection}; selection-color:{text};
+}}
 QToolButton {{ color:{text}; }}
+QCheckBox, QRadioButton {{ color:{text}; {base_font} background:transparent; }}
+
+/* Tables and lists ------------------------------------------------------- */
 QTableWidget, QTableView {{
     background:{surface_bg}; color:{text}; gridline-color:{border};
-    border:none; {base_font}
+    border:1px solid {border}; border-radius:10px; {base_font}
+    selection-background-color:{selection}; selection-color:{text};
+    alternate-background-color:{zebra};
+}}
+QTableView::item {{ padding:4px 8px; }}
+QListView, QTreeView, QListWidget, QTreeWidget {{
+    background:{surface_bg}; color:{text}; border:1px solid {border};
+    border-radius:10px; alternate-background-color:{zebra};
+}}
+QListWidget::item, QTreeWidget::item {{ padding:5px 8px; }}
+QListWidget::item:selected, QTreeWidget::item:selected {{
+    background:{selection}; color:{text};
 }}
 QHeaderView::section {{
-    background:{window_bg}; color:{text}; padding:3px 6px;
+    background:{window_bg}; color:{text}; padding:6px 10px;
     border:none; border-right:1px solid {border}; border-bottom:1px solid {border};
+    font-weight:600;
 }}
 QTableCornerButton::section {{ background:{window_bg}; border:none; }}
+
+/* Scrollbars (slim, rounded) --------------------------------------------- */
+QScrollBar:vertical {{ background:transparent; width:12px; margin:2px; }}
+QScrollBar::handle:vertical {{
+    background:{selection}; border-radius:5px; min-height:30px;
+}}
+QScrollBar::handle:vertical:hover {{ background:{muted}; }}
+QScrollBar:horizontal {{ background:transparent; height:12px; margin:2px; }}
+QScrollBar::handle:horizontal {{
+    background:{selection}; border-radius:5px; min-width:30px;
+}}
+QScrollBar::handle:horizontal:hover {{ background:{muted}; }}
+QScrollBar::add-line, QScrollBar::sub-line {{ width:0; height:0; }}
+QScrollBar::add-page, QScrollBar::sub-page {{ background:transparent; }}
+
+/* Splitter, menus, tooltip ----------------------------------------------- */
+QSplitter::handle {{ background:{border}; }}
+QMenu {{ background:{surface_bg}; color:{text}; border:1px solid {border};
+    border-radius:8px; padding:4px; }}
+QMenu::item {{ padding:6px 18px; border-radius:6px; }}
+QMenu::item:selected {{ background:{brand_soft}; color:{accent}; }}
+QToolTip {{
+    background:#111827; color:#ffffff; border:none; border-radius:6px;
+    padding:5px 8px; {small_font}
+}}
 """.format(
             chrome_bg=self.chrome_bg, window_bg=self.window_bg,
             surface_bg=self.surface_bg, border=self.border, radius=self.radius,
             text=self.text, muted=self.text_muted, accent=self.accent,
-            value_size=self.value_size,
+            accent_hover=self._accent_hover(), zebra=self.zebra,
+            selection=self.selection, brand_soft=self._brand_soft(),
+            value_size=self.value_size, font_family=self.font_stack(),
             title_font=self._font_rule(self.title_size),
             small_font=self._font_rule(11),
             base_font=self._font_rule(self.font_size),
         )
+
+    def _accent_rgb(self):
+        c = self.accent.lstrip("#")
+        if len(c) == 6:
+            return int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+        return 43, 125, 233   # fall back to the default blue
+
+    def _accent_hover(self):
+        """A slightly darker shade of the accent for hover/pressed states."""
+        r, g, b = self._accent_rgb()
+        return "#{:02x}{:02x}{:02x}".format(
+            int(r * 0.86), int(g * 0.86), int(b * 0.86))
+
+    def _brand_soft(self):
+        """A faint translucent tint of the accent for hover fills."""
+        r, g, b = self._accent_rgb()
+        return "rgba({}, {}, {}, 0.10)".format(r, g, b)
 
     def tile_qss(self):
         """Per-tile override stylesheet (scoped to one tile via objectName)."""

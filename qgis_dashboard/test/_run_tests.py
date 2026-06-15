@@ -38,7 +38,8 @@ for mod in _BARE:
 # break their package-relative imports).
 for sub in ("base", "chart", "chart_specs", "charts", "charts.painters",
             "pivot", "pivot_engine",
-            "indicator", "list_element", "map_element", "category_selector"):
+            "indicator", "list_element", "map_element", "category_selector",
+            "text_element", "image_element"):
     full = "{}.elements.{}".format(pkg, sub)
     if full in sys.modules:
         sys.modules["elements.{}".format(sub)] = sys.modules[full]

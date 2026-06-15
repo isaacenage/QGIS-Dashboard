@@ -36,6 +36,9 @@ class DashboardElement(QFrame):
     type_name = "element"
     is_filter_source = False   # pushes filters onto the bus
     accepts_filter = True      # re-queries when a connected source filters
+    full_bleed = False         # when True the visualization fills the tile
+                               # edge-to-edge: no title/description chrome and
+                               # no internal padding (e.g. the live map mirror)
 
     def __init__(self, bus, config=None, parent=None):
         super().__init__(parent)
@@ -45,28 +48,41 @@ class DashboardElement(QFrame):
         self.config["id"] = self.id
         self.setObjectName("dashboardElement")
         self.setFrameShape(QFrame.StyledPanel)
+        # full-bleed tiles get square corners so a rectangular child (the map
+        # canvas) aligns with the frame instead of poking over rounded corners
+        self.setProperty("fullBleed", bool(self.full_bleed))
 
         self._outer = QVBoxLayout(self)
-        self._outer.setContentsMargins(12, 8, 12, 10)
-        self._outer.setSpacing(6)
+        if self.full_bleed:
+            self._outer.setContentsMargins(0, 0, 0, 0)
+            self._outer.setSpacing(0)
+        else:
+            self._outer.setContentsMargins(12, 8, 12, 10)
+            self._outer.setSpacing(6)
 
-        # --- title area ---
+        # --- title area (omitted entirely for full-bleed tiles) ---
         self.title_label = QLabel(self.config.get("title", self.type_name.title()))
         self.title_label.setObjectName("elementTitle")
-        self._outer.addWidget(self.title_label)
+        if self.full_bleed:
+            self.title_label.hide()
+        else:
+            self._outer.addWidget(self.title_label)
 
         # --- visualization area (subclasses fill this) ---
         self.body = QVBoxLayout()
-        self.body.setSpacing(4)
+        self.body.setSpacing(0 if self.full_bleed else 4)
         self._outer.addLayout(self.body, stretch=1)
 
-        # --- description area (optional) ---
+        # --- description area (optional; omitted for full-bleed tiles) ---
         desc = self.config.get("description")
         self.desc_label = QLabel(desc or "")
         self.desc_label.setObjectName("elementDescription")
         self.desc_label.setWordWrap(True)
-        self.desc_label.setVisible(bool(desc))
-        self._outer.addWidget(self.desc_label)
+        if self.full_bleed:
+            self.desc_label.hide()
+        else:
+            self.desc_label.setVisible(bool(desc))
+            self._outer.addWidget(self.desc_label)
 
         # subscribe to the cross-filter bus + appearance
         self.bus.filtersChanged.connect(self._on_filters_changed)

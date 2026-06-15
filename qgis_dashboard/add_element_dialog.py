@@ -7,12 +7,43 @@ configuration panels — enough to bind data and see the dashboard work.
 """
 
 from qgis.PyQt.QtWidgets import (
-    QDialog, QFormLayout, QComboBox, QLineEdit, QDialogButtonBox, QCheckBox
+    QDialog, QFormLayout, QComboBox, QLineEdit, QDialogButtonBox, QCheckBox,
+    QPlainTextEdit, QWidget, QHBoxLayout, QPushButton, QFileDialog,
 )
 from qgis.gui import QgsMapLayerComboBox, QgsFieldComboBox
 from qgis.core import QgsMapLayerProxyModel
 from .elements import ELEMENT_LABELS
 from .elements.chart_specs import CHART_SPECS, CHART_TYPE_ORDER
+
+# element types that bind to no vector layer (the Layer row is hidden for them)
+_LAYERLESS_TYPES = ("text", "image")
+
+_IMAGE_FILTER = ("Images (*.png *.jpg *.jpeg *.svg *.gif *.bmp *.webp);;"
+                 "All files (*)")
+
+
+class _PathPicker(QWidget):
+    """A read/write path field with a 'Browse…' button (image file chooser)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        self._edit = QLineEdit()
+        browse = QPushButton("Browse…")
+        browse.setProperty("variant", "secondary")
+        browse.clicked.connect(self._browse)
+        row.addWidget(self._edit, 1)
+        row.addWidget(browse)
+
+    def _browse(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Choose image", self._edit.text(), _IMAGE_FILTER)
+        if path:
+            self._edit.setText(path)
+
+    def path(self):
+        return self._edit.text().strip()
 
 
 class AddElementDialog(QDialog):
@@ -65,10 +96,32 @@ class AddElementDialog(QDialog):
         c.setLayer(self.layer_combo.currentLayer())
         return c
 
+    def _set_layer_row_visible(self, visible):
+        lbl = self.form.labelForField(self.layer_combo)
+        self.layer_combo.setVisible(visible)
+        if lbl:
+            lbl.setVisible(visible)
+
     def _rebuild(self):
         self._clear_dynamic()
         t = self.type_combo.currentData()
-        if t == "indicator":
+        self._set_layer_row_visible(t not in _LAYERLESS_TYPES)
+        if t == "text":
+            self._add_dyn("text", "Text", QPlainTextEdit())
+            align = QComboBox()
+            align.addItem("Left", "left")
+            align.addItem("Center", "center")
+            align.addItem("Right", "right")
+            self._add_dyn("align", "Alignment", align)
+            heading = QCheckBox()
+            self._add_dyn("heading", "Heading style", heading)
+        elif t == "image":
+            self._add_dyn("path", "Image file", _PathPicker())
+            fit = QComboBox()
+            fit.addItem("Fit (keep aspect)", "contain")
+            fit.addItem("Stretch to fill", "stretch")
+            self._add_dyn("fit", "Scaling", fit)
+        elif t == "indicator":
             self._add_dyn("value_expression", "Value expression",
                           QLineEdit("count(1)"))
             self._add_dyn("reference_expression", "Reference expr (opt)",
@@ -119,6 +172,10 @@ class AddElementDialog(QDialog):
             elif isinstance(w, QComboBox):
                 data = w.currentData()
                 cfg[key] = data if data is not None else w.currentText()
+            elif isinstance(w, _PathPicker):
+                cfg[key] = w.path()
+            elif isinstance(w, QPlainTextEdit):
+                cfg[key] = w.toPlainText()
             elif isinstance(w, QLineEdit):
                 val = w.text().strip()
                 if val:

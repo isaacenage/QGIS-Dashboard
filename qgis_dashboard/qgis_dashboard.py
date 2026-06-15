@@ -37,6 +37,7 @@ try:
 except ImportError:
     _HAS_RESOURCES = False
 
+from .icons import logo_icon
 from .window import DashboardWindow
 
 
@@ -96,7 +97,16 @@ class qgisdashboard:
         return QCoreApplication.translate('qgisdashboard', message)
 
     def _icon(self):
-        """Return the plugin icon, from compiled resources or the filesystem."""
+        """Return the plugin icon for the toolbar / Plugins menu.
+
+        Prefers the branded gradient logo (rendered from an embedded SVG, the
+        same art used for the dashboard window's title-bar icon). Falls back
+        to the compiled Qt resource and then the on-disk ``icon.png`` so the
+        plugin still shows an icon if ``QtSvg`` is somehow unavailable.
+        """
+        logo = logo_icon()
+        if not logo.isNull():
+            return logo
         if _HAS_RESOURCES:
             icon = QIcon(':/plugins/qgis_dashboard/icon.png')
             if not icon.isNull():

@@ -121,8 +121,27 @@ class DashboardBus(QObject):
     def targets_of(self, source_id):
         return set(self._connections.get(source_id, set()))
 
+    def sources_of(self, target_id):
+        """Reverse lookup: every source whose filter reaches *target_id*."""
+        return {src for src, tgts in self._connections.items()
+                if target_id in tgts}
+
     def is_connected(self, source_id, target_id):
         return target_id in self._connections.get(source_id, set())
+
+    def set_connected(self, source_id, target_id, connected):
+        """Add or remove a single source → target edge, leaving others intact.
+
+        A no-op (the edge already matches *connected*) emits no signals.
+        """
+        if source_id == target_id or self.is_connected(source_id, target_id) == bool(connected):
+            return
+        targets = self.targets_of(source_id)
+        if connected:
+            targets.add(target_id)
+        else:
+            targets.discard(target_id)
+        self.set_targets(source_id, targets)
 
     def set_targets(self, source_id, target_ids):
         targets = {t for t in target_ids if t and t != source_id}

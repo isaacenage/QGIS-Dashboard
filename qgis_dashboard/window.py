@@ -381,8 +381,13 @@ class DashboardWindow(QMainWindow):
             dlg.apply()
 
     def open_settings(self):
-        dlg = SettingsDialog(self.open_appearance, self)
+        dlg = SettingsDialog(self.open_appearance, self,
+                             on_export=self.export_to_html)
         dlg.exec_()
+
+    def export_to_html(self):
+        from .export_dialog import prompt_and_export
+        prompt_and_export(self, self)
 
     def open_appearance(self):
         original = self.bus.theme

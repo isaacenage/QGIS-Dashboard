@@ -64,6 +64,17 @@ The factory and labels live in `elements/__init__.py` (`ELEMENT_TYPES`, `ELEMENT
 
 **Icon loading is intentionally resilient:** `from .resources import *` is wrapped in `try/except ImportError`. If `resources.py` was never compiled, the icon loads from the filesystem (`os.path.join(plugin_dir, 'icon.png')`) instead of the Qt resource path. This is what lets the plugin install without a build step — do not reintroduce a hard `from .resources import *`.
 
+### Interactive HTML export (`export/`)
+
+The Settings hub ("Export to HTML…", wired via `window.export_to_html` → `export_dialog.prompt_and_export`) writes the whole dashboard to a **single self-contained `index.html`** that opens offline by double-click, with **live cross-filtering** reproduced client-side. There is **no framework, no Node, no server** — that is a hard requirement driven by the `file://` protocol (it blocks `fetch`, ES-module `import`, and Web Workers), so everything (CSS, JS, data) is inlined, data is embedded in a `<script type="application/json">` block (read, never fetched), and there is no MapLibre/charting library.
+
+- **`export/serialize.py`, `export/theme_css.py`, `export/html_builder.py`** are **pure** (no QGIS/Qt) and unit-tested in `test/test_html_export.py`: they assemble the export-model dict, turn `Theme.to_dict()` into `:root` CSS variables (web mirror of `Theme.window_qss`), and inline the runtime + escaped JSON into the final HTML.
+- **`export/data_collect.py`, `export/map_snapshot.py`, `export/html_export.py`** are the QGIS-touching layer: per-layer rows (all fields, deduped per layer), each tile's static `base_filter` evaluated server-side into a list of passing feature **indices** (so the browser needs no QgsExpression parser — it intersects index sets), image files base64-embedded, the map tile grabbed to a base64 PNG (a static snapshot — an interactive web map is impossible under double-click `file://`), and a per-layer size guard (`oversize_layers`) feeding the Proceed/Skip/Cancel warning.
+- **`export/assets/runtime.js` + `runtime.css`** are the **vanilla-JS browser runtime**, shipped as real asset files (not Python string blobs) and inlined at export. `runtime.js` ports `bus.combined_filter_for` + each source's click logic (sources push `(field, value)` equality predicates; targets AND them over their own rows), `chart._aggregate` + `fold_categories`, and `pivot_engine.compute_pivot`; charts are hand-drawn inline SVG (bar/barh/line/area/pie/donut). Indicators evaluate the common aggregate-expression forms client-side and fall back to a server-computed `indicator_value` for anything unsupported.
+- Registered in **both** `pb_tool.cfg` (`python_files` += `export_dialog.py`; `extra_dirs` += `export`) and `Makefile` (`PY_FILES`/`SOURCES` += `export_dialog.py`; `EXTRA_DIRS` += `export`). The `export/` package ships via `extra_dirs` (like `elements/`), so its `assets/` go along.
+
+Design spec: `docs/superpowers/specs/2026-06-16-html-export-design.md`.
+
 ## Common commands
 
 This is a QGIS/PyQt5 plugin; there is no app build. "Running" means loading it inside QGIS. The QGIS Python environment must be on `PYTHONPATH` for tests and imports (`qgis.core`, `qgis.gui`, `qgis.PyQt`).
@@ -72,7 +83,13 @@ This is a QGIS/PyQt5 plugin; there is no app build. "Running" means loading it i
 # Syntax-check everything (no QGIS needed — catches typos fast)
 cd qgis_dashboard && python -m py_compile __init__.py qgis_dashboard.py window.py bus.py \
   theme.py icons.py sidebar.py dashboard_canvas.py add_element_dialog.py settings_dialog.py \
-  appearance_dialog.py connections_dialog.py elements/*.py
+  appearance_dialog.py connections_dialog.py export_dialog.py export/*.py elements/*.py
+
+# Run the export's pure-module tests without QGIS (run the file directly so the
+# test package __init__ — which imports qgis — is not loaded):
+cd qgis_dashboard && PYTHONPATH=$(pwd) python test/test_html_export.py
+# Syntax-check the browser runtime (needs node, optional):
+node --check qgis_dashboard/export/assets/runtime.js
 
 # Install for manual testing: copy (or symlink) the plugin folder into the
 # QGIS plugins directory, then enable "QGIS Dashboard" in Plugins > Manage.

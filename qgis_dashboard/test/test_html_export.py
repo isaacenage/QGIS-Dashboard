@@ -1,0 +1,145 @@
+# coding=utf-8
+"""Tests for the HTML export's pure (Qt/QGIS-free) modules.
+
+Mirrors the pivot_engine testing pattern: the serialization, theme-to-CSS, and
+HTML-assembly logic is exercised on plain dicts with no QGIS runtime. The
+QGIS-touching collectors and the JS runtime are verified manually inside QGIS /
+a browser (see the design spec's testing section).
+"""
+
+__author__ = 'isaacenagework@gmail.com'
+__date__ = '2026-06-16'
+__copyright__ = 'Copyright 2026, Isaac Enage'
+
+import json
+import unittest
+
+from export.serialize import (
+    build_model, build_tile, build_page, clean_config, EXPORT_VERSION,
+)
+from export.theme_css import theme_to_css_vars
+from export.html_builder import build_html, embed_json
+
+
+class CleanConfigTest(unittest.TestCase):
+    def test_drops_id_keeps_rest(self):
+        cfg = {"id": "abc", "title": "Pop", "layer_id": "L1", "chart_type": "bar"}
+        out = clean_config(cfg)
+        self.assertNotIn("id", out)
+        self.assertEqual(out["title"], "Pop")
+        self.assertEqual(out["chart_type"], "bar")
+
+    def test_none_yields_empty(self):
+        self.assertEqual(clean_config(None), {})
+
+
+class BuildTileTest(unittest.TestCase):
+    def test_minimal_tile(self):
+        tile = {"id": "t1", "type": "chart",
+                "grid": {"x": 0, "y": 0, "w": 4, "h": 3},
+                "config": {"id": "t1", "category_field": "region"}}
+        out = build_tile(tile)
+        self.assertEqual(out["id"], "t1")
+        self.assertEqual(out["type"], "chart")
+        self.assertEqual(out["grid"], {"x": 0, "y": 0, "w": 4, "h": 3})
+        self.assertEqual(out["config"], {"category_field": "region"})
+        # absent optional keys are omitted entirely
+        self.assertNotIn("layer_id", out)
+        self.assertNotIn("base_pass", out)
+
+    def test_optional_keys_passthrough(self):
+        tile = {"id": "m", "type": "map", "grid": {},
+                "map_image": "data:image/png;base64,AAAA",
+                "layer_id": "L1", "base_pass": [0, 2]}
+        out = build_tile(tile)
+        self.assertEqual(out["map_image"], "data:image/png;base64,AAAA")
+        self.assertEqual(out["layer_id"], "L1")
+        self.assertEqual(out["base_pass"], [0, 2])
+
+    def test_none_optional_is_omitted(self):
+        tile = {"id": "i", "type": "indicator", "grid": {},
+                "indicator_value": None}
+        out = build_tile(tile)
+        self.assertNotIn("indicator_value", out)
+
+
+class BuildModelTest(unittest.TestCase):
+    def _page(self):
+        return {"id": "p1", "title": "Page 1",
+                "connections": {"s": ["t"]},
+                "tiles": [{"id": "s", "type": "chart", "grid": {},
+                           "config": {}}]}
+
+    def test_top_level_shape(self):
+        model = build_model((12, 8), {"accent": "#123456"}, "p1",
+                            [self._page()], {"L1": {"fields": [], "features": []}})
+        self.assertEqual(model["version"], EXPORT_VERSION)
+        self.assertEqual(model["grid"], {"cols": 12, "rows": 8})
+        self.assertEqual(model["theme"], {"accent": "#123456"})
+        self.assertEqual(model["active_page"], "p1")
+        self.assertEqual(len(model["pages"]), 1)
+        self.assertEqual(model["pages"][0]["connections"], {"s": ["t"]})
+        self.assertIn("L1", model["layers"])
+
+    def test_round_trips_through_json(self):
+        model = build_model((10, 6), {}, "p1", [self._page()], {})
+        again = json.loads(json.dumps(model))
+        self.assertEqual(again["grid"]["cols"], 10)
+
+
+class ThemeCssTest(unittest.TestCase):
+    def test_emits_core_variables(self):
+        css = theme_to_css_vars({"accent": "#2b7de9", "surface_bg": "#ffffff"})
+        self.assertIn(":root", css)
+        self.assertIn("--accent: #2b7de9;", css)
+        self.assertIn("--surface-bg: #ffffff;", css)
+
+    def test_derives_accent_hover_darker(self):
+        css = theme_to_css_vars({"accent": "#ffffff"})
+        # 255 * 0.86 = 219 -> 0xdb
+        self.assertIn("--accent-hover: #dbdbdb;", css)
+
+    def test_series_become_indexed_vars(self):
+        css = theme_to_css_vars({"series": ["#111111", "#222222"]})
+        self.assertIn("--series-0: #111111;", css)
+        self.assertIn("--series-1: #222222;", css)
+
+    def test_missing_keys_fall_back(self):
+        css = theme_to_css_vars({})
+        self.assertIn("--accent: #2b7de9;", css)
+        self.assertIn("Inter", css)
+
+
+class HtmlBuilderTest(unittest.TestCase):
+    def test_embed_json_neutralizes_script_close(self):
+        embedded = embed_json({"x": "</script><b>hi"})
+        self.assertNotIn("</script>", embedded)
+        self.assertIn("<\\/script>", embedded)
+
+    def test_build_html_contains_data_css_and_js(self):
+        model = build_model((12, 8), {"accent": "#abcdef"}, "p1",
+                            [{"id": "p1", "title": "P", "connections": {},
+                              "tiles": []}], {})
+        html = build_html(model, ":root{--accent:#abcdef;}",
+                          "/*css*/", "/*js*/", title="My Dash")
+        self.assertIn("<!doctype html>", html)
+        self.assertIn('id="dashboard-data"', html)
+        self.assertIn("--accent:#abcdef;", html)
+        self.assertIn("/*js*/", html)
+        self.assertIn("<title>My Dash</title>", html)
+        # the embedded JSON is real, parseable JSON
+        marker = 'id="dashboard-data">'
+        start = html.index(marker) + len(marker)
+        end = html.index("</script>", start)
+        parsed = json.loads(html[start:end])
+        self.assertEqual(parsed["theme"]["accent"], "#abcdef")
+
+    def test_build_html_escapes_title(self):
+        model = build_model((1, 1), {}, None, [], {})
+        html = build_html(model, "", "", "", title="<evil>")
+        self.assertIn("&lt;evil&gt;", html)
+        self.assertNotIn("<title><evil>", html)
+
+
+if __name__ == "__main__":
+    unittest.main()

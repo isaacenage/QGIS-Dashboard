@@ -40,13 +40,15 @@ class SettingsDialog(QDialog):
 
     *on_appearance* is a no-arg callback that opens the Appearance dialog (the
     window owns the live-preview/revert logic, so we just delegate to it).
+    *on_export* is an optional no-arg callback that runs the HTML export.
     """
 
-    def __init__(self, on_appearance, parent=None):
+    def __init__(self, on_appearance, parent=None, on_export=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.setMinimumWidth(480)
         self._on_appearance = on_appearance
+        self._on_export = on_export
 
         border, muted = "#e2e6ec", "#55606d"
         if parent is not None and hasattr(parent, "bus"):
@@ -74,6 +76,26 @@ class SettingsDialog(QDialog):
         appearance_btn.setCursor(Qt.PointingHandCursor)
         appearance_btn.clicked.connect(self._open_appearance)
         root.addWidget(appearance_btn)
+
+        # ---- Export ------------------------------------------------------
+        if self._on_export is not None:
+            root.addWidget(self._separator(border))
+            export_caption = QLabel("Export")
+            export_caption.setStyleSheet("font-weight:600;")
+            root.addWidget(export_caption)
+
+            export_hint = QLabel(
+                "Save this dashboard as a single, self-contained HTML file — "
+                "open it in any browser, offline, with live cross-filtering.")
+            export_hint.setWordWrap(True)
+            export_hint.setStyleSheet("color:%s;" % muted)
+            root.addWidget(export_hint)
+
+            export_btn = QPushButton("Export to HTML…")
+            export_btn.setProperty("variant", "secondary")
+            export_btn.setCursor(Qt.PointingHandCursor)
+            export_btn.clicked.connect(self._open_export)
+            root.addWidget(export_btn)
 
         root.addWidget(self._separator(border))
 
@@ -104,6 +126,11 @@ class SettingsDialog(QDialog):
     def _open_appearance(self):
         if callable(self._on_appearance):
             self._on_appearance()
+
+    def _open_export(self):
+        if callable(self._on_export):
+            self.accept()
+            self._on_export()
 
 
 class GridSettingsDialog(QDialog):

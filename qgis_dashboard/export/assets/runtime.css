@@ -1,0 +1,140 @@
+/* Structural styles for the exported dashboard.
+   Colors/fonts come from the :root custom properties emitted by theme_css.py,
+   so this file is theme-agnostic and mirrors the plugin's "modern analytics"
+   look (theme.window_qss). */
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--chrome-bg);
+  color: var(--text);
+  font-family: var(--font-family);
+  font-size: var(--font-size);
+}
+
+#app { display: flex; flex-direction: column; height: 100vh; }
+
+/* ---- page tabs ---------------------------------------------------------- */
+.dash-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px 8px 0 8px;
+  background: var(--chrome-bg);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.dash-tab {
+  padding: 8px 16px;
+  color: var(--muted);
+  font-weight: 500;
+  border: none;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+}
+.dash-tab:hover { color: var(--text); }
+.dash-tab.active {
+  color: var(--accent);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+  background: var(--brand-soft);
+}
+
+/* ---- page canvas (grid) ------------------------------------------------- */
+.dash-page {
+  flex: 1 1 auto;
+  overflow: auto;
+  background: var(--window-bg);
+  padding: 10px;
+}
+.dash-grid {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  height: 100%;
+  min-height: 360px;
+}
+
+/* ---- tiles -------------------------------------------------------------- */
+.dash-tile {
+  background: var(--surface-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px 10px 14px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.dash-tile.full-bleed { padding: 0; border-radius: var(--radius); }
+.dash-tile-title {
+  color: var(--text);
+  font-size: var(--title-size);
+  font-weight: 600;
+  margin: 0 0 6px 0;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dash-tile-body { flex: 1 1 auto; min-height: 0; position: relative; }
+
+/* indicator */
+.dash-indicator { display: flex; flex-direction: column; align-items: center;
+  justify-content: center; height: 100%; text-align: center; }
+.dash-ind-top { color: var(--muted); font-size: 11px; }
+.dash-ind-value { color: var(--accent); font-size: var(--value-size);
+  font-weight: 700; line-height: 1.1; }
+.dash-ind-bottom { color: var(--muted); font-size: 11px; }
+.dash-ind-bottom.up { color: #13a10e; }
+.dash-ind-bottom.down { color: #d13438; }
+
+/* charts */
+.dash-chart { width: 100%; height: 100%; display: block; }
+.dash-chart text { font-family: var(--font-family); }
+.dash-empty { display: flex; align-items: center; justify-content: center;
+  height: 100%; color: var(--muted); }
+
+/* tables (list + pivot) */
+.dash-table-wrap { width: 100%; height: 100%; overflow: auto; }
+table.dash-table { border-collapse: collapse; width: 100%; font-size: var(--font-size); }
+table.dash-table th, table.dash-table td {
+  padding: 5px 9px; border-bottom: 1px solid var(--border);
+  text-align: right; white-space: nowrap;
+}
+table.dash-table th {
+  background: var(--window-bg); color: var(--text); font-weight: 600;
+  position: sticky; top: 0; cursor: default;
+}
+table.dash-table tbody tr:nth-child(even) { background: var(--zebra); }
+table.dash-table td.rowhead, table.dash-table th.rowhead { text-align: left; font-weight: 600; }
+table.dash-table .clickable { cursor: pointer; }
+table.dash-table .selected { background: var(--brand-soft) !important;
+  outline: 1px solid var(--accent); }
+table.dash-table tr.selected td { background: var(--brand-soft); }
+
+/* text + image + map */
+.dash-text { width: 100%; height: 100%; display: flex; padding: 4px; }
+.dash-text .inner { width: 100%; }
+.dash-image, .dash-map { width: 100%; height: 100%; object-fit: contain;
+  display: block; }
+.dash-map-wrap, .dash-image-wrap { width: 100%; height: 100%; display: flex;
+  align-items: center; justify-content: center; overflow: hidden; }
+
+/* category selector */
+.dash-selector { display: flex; flex-direction: column; gap: 6px; }
+.dash-selector select {
+  background: var(--surface-bg); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text); padding: 6px 9px;
+  font-family: inherit; font-size: inherit; min-height: 30px;
+}
+.dash-selector select:focus { outline: none; border-color: var(--accent); }
+
+.dash-note { padding: 10px; color: var(--muted); font-size: 11px; }

@@ -72,6 +72,21 @@ class BuildTileTest(unittest.TestCase):
         self.assertEqual(out["config"]["value_size"], 48)
 
 
+class BuildPageHeaderTest(unittest.TestCase):
+    def test_header_passes_through_when_present(self):
+        page = {"id": "p1", "title": "P", "connections": {}, "tiles": [],
+                "header": {"title": "Brand", "anchor": "top",
+                           "logo_uri": "data:image/png;base64,AA"}}
+        out = build_page(page)
+        self.assertEqual(out["header"]["title"], "Brand")
+        self.assertEqual(out["header"]["logo_uri"], "data:image/png;base64,AA")
+
+    def test_no_header_key_when_absent(self):
+        out = build_page({"id": "p1", "title": "P", "connections": {},
+                          "tiles": []})
+        self.assertNotIn("header", out)
+
+
 class BuildModelTest(unittest.TestCase):
     def _page(self):
         return {"id": "p1", "title": "Page 1",
@@ -89,6 +104,14 @@ class BuildModelTest(unittest.TestCase):
         self.assertEqual(len(model["pages"]), 1)
         self.assertEqual(model["pages"][0]["connections"], {"s": ["t"]})
         self.assertIn("L1", model["layers"])
+
+    def test_gap_defaults_to_zero(self):
+        model = build_model((12, 8), {}, "p1", [self._page()], {})
+        self.assertEqual(model["gap"], 0)
+
+    def test_gap_is_carried_through(self):
+        model = build_model((12, 8), {}, "p1", [self._page()], {}, gap=16)
+        self.assertEqual(model["gap"], 16)
 
     def test_round_trips_through_json(self):
         model = build_model((10, 6), {}, "p1", [self._page()], {})

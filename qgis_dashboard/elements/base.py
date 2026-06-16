@@ -47,7 +47,7 @@ class DashboardElement(QFrame):
         self.id = self.config.get("id") or uuid.uuid4().hex[:8]
         self.config["id"] = self.id
         self.setObjectName("dashboardElement")
-        self.setFrameShape(QFrame.StyledPanel)
+        self.setFrameShape(QFrame.Shape.StyledPanel)
         # full-bleed tiles get square corners so a rectangular child (the map
         # canvas) aligns with the frame instead of poking over rounded corners
         self.setProperty("fullBleed", bool(self.full_bleed))
@@ -109,6 +109,21 @@ class DashboardElement(QFrame):
     def _restyle(self):
         """Hook for subclasses with custom-painted views; default repaint."""
         self.update()
+
+    def reconfigure(self):
+        """Re-read ``config`` after an in-place edit (the Configure dialog).
+
+        Updates the shared title/description chrome and re-applies appearance +
+        data so a configuration change is reflected without recreating the tile.
+        Subclasses that cache config in ``__init__`` override to extend this.
+        """
+        self.title_label.setText(self.config.get("title", self.type_name.title()))
+        desc = self.config.get("description")
+        self.desc_label.setText(desc or "")
+        if not self.full_bleed:
+            self.desc_label.setVisible(bool(desc))
+        self.apply_theme()
+        self.refresh()
 
     # ---- data helpers shared by every data-driven element ----
 

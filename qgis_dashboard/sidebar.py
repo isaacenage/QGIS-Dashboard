@@ -40,11 +40,11 @@ class Sidebar(QFrame):
 
         self._logo = QLabel(self)
         self._logo.setObjectName("dashSidebarLogo")
-        self._logo.setAlignment(Qt.AlignCenter)
+        self._logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._logo.setFixedSize(BUTTON_SIZE, BUTTON_SIZE)
         self._logo.setPixmap(logo_pixmap(LOGO_SIZE))
         self._logo.setToolTip("QGIS Dashboard")
-        self._layout.addWidget(self._logo, 0, Qt.AlignHCenter)
+        self._layout.addWidget(self._logo, 0, Qt.AlignmentFlag.AlignHCenter)
         self.add_separator()
 
     # ---- builders ----
@@ -55,9 +55,9 @@ class Sidebar(QFrame):
         btn.setObjectName("dashRailButton")
         btn.setToolTip(tooltip)
         btn.setAccessibleName(tooltip)
-        btn.setCursor(Qt.PointingHandCursor)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setAutoRaise(True)
-        btn.setFocusPolicy(Qt.TabFocus)
+        btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         btn.setFixedSize(BUTTON_SIZE, BUTTON_SIZE)
         btn.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
         icon = monochrome_icon(icon_key, self._theme.text)
@@ -66,7 +66,7 @@ class Sidebar(QFrame):
         else:
             btn.setIcon(icon)
         btn.clicked.connect(lambda _checked=False, cb=callback: cb())
-        self._layout.addWidget(btn, 0, Qt.AlignHCenter)
+        self._layout.addWidget(btn, 0, Qt.AlignmentFlag.AlignHCenter)
         self._buttons.append((btn, icon_key))
         return btn
 
@@ -75,7 +75,7 @@ class Sidebar(QFrame):
         line.setObjectName("dashRailSep")
         line.setFixedHeight(1)
         line.setFixedWidth(BUTTON_SIZE - 12)
-        self._layout.addWidget(line, 0, Qt.AlignHCenter)
+        self._layout.addWidget(line, 0, Qt.AlignmentFlag.AlignHCenter)
         return line
 
     def add_stretch(self):

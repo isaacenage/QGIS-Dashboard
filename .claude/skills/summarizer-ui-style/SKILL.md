@@ -102,9 +102,14 @@ btn.setIcon(svg_icon("Refresh.svg"))     # loads resources/SVG/Refresh.svg, empt
 3. Read colors you need in code (e.g. for QPainter charts) from `palette_context(mode)` — never hardcode hex.
 4. To support dark mode, set `themeMode` on the root and re-polish.
 
+## Borders are hairlines, never heavy black outlines
+
+Always use the `color_border` hairline (`#E2E6EC` light / `#334155` dark) for separators, edges, and dividers — `1px solid ${color_border}`, exactly like the navigation rail. **Never** use dark/near-black outlines (`#000`, `#111`, thick borders) for chrome; they read as heavy and unprofessional. When a native widget paints its own dark line (e.g. `QTabBar`'s base line under the tabs), disable it in code (`QTabBar.setDrawBase(False)`) and supply the hairline via QSS instead. For emphasis, prefer a subtle tinted background (a soft brand/selection fill) over a strong outline.
+
 ## Common mistakes
 
 - **Hardcoding hex in widget code or per-widget `setStyleSheet`.** Breaks theming and dark mode. Use a token + property selector.
+- **Dark or heavy borders.** Use the `color_border` hairline for every edge/divider; never `#000`/`#111`/thick outlines. Kill native dark lines (`setDrawBase(False)` on tab bars) and draw the hairline yourself.
 - **Forgetting to re-polish** after changing a dynamic property at runtime — Qt won't restyle until `unpolish`/`polish`.
 - **Forgetting `ensure_ui_fonts_registered()`** before applying QSS → Inter falls back to a system font.
 - **Using `${token}` not present in the palette** — `safe_substitute` leaves it literal and Qt silently ignores the rule. Add the token to `palette.py`.

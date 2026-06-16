@@ -50,13 +50,13 @@ def prompt_and_export(window, parent=None):
     if big:
         box = QMessageBox(parent)
         box.setWindowTitle("Large data")
-        box.setIcon(QMessageBox.Warning)
+        box.setIcon(QMessageBox.Icon.Warning)
         box.setText(_format_warning(big))
-        proceed = box.addButton("Export anyway", QMessageBox.AcceptRole)
-        skip = box.addButton("Skip these layers", QMessageBox.DestructiveRole)
-        cancel = box.addButton(QMessageBox.Cancel)
+        proceed = box.addButton("Export anyway", QMessageBox.ButtonRole.AcceptRole)
+        skip = box.addButton("Skip these layers", QMessageBox.ButtonRole.DestructiveRole)
+        cancel = box.addButton(QMessageBox.StandardButton.Cancel)
         box.setDefaultButton(cancel)
-        box.exec_()
+        box.exec()
         clicked = box.clickedButton()
         if clicked is cancel:
             return

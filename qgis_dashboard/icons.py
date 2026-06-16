@@ -119,6 +119,10 @@ ICONS = {
         '<rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/>'
         '<rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/>'
         '<rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>'),
+    # spacing / element gap (an inner card inset within an outer one) — Settings nav glyph
+    "spacing": _stroke(
+        '<rect x="3" y="3" width="18" height="18" rx="2.5"/>'
+        '<rect x="7.5" y="7.5" width="9" height="9" rx="1.5"/>'),
     # info (circled "i") — Settings "About" nav glyph
     "info": _stroke(
         '<circle cx="12" cy="12" r="9"/>'

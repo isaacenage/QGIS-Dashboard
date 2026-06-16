@@ -44,8 +44,8 @@ class PivotElement(DashboardElement):
     def __init__(self, bus, config=None, parent=None):
         super().__init__(bus, config, parent)
         self.table = QTableWidget()
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.setSelectionMode(QAbstractItemView.NoSelection)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.table.verticalHeader().setVisible(False)
         self.table.cellClicked.connect(self._on_cell)
         self.table.horizontalHeader().sectionClicked.connect(self._on_header)
@@ -132,9 +132,9 @@ class PivotElement(DashboardElement):
             f.setBold(True)
             item.setFont(f)
         if header:
-            item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         else:
-            item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         return item
 
     # ---- interactivity (source) ----

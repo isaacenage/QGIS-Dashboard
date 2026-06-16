@@ -12,6 +12,7 @@ The shape it produces (``EXPORT_VERSION`` 1)::
     {
       "version": 1,
       "grid": {"cols": 12, "rows": 8},
+      "gap": 0,
       "theme": { ... Theme.to_dict() ... },
       "active_page": "<page id>",
       "pages": [
@@ -31,6 +32,7 @@ EXPORT_VERSION = 1
 # Optional per-tile keys copied through verbatim when present (and not None).
 _OPTIONAL_TILE_KEYS = (
     "layer_id", "base_pass", "map_image", "image_uri", "indicator_value",
+    "icon_uri",
 )
 
 
@@ -64,26 +66,35 @@ def build_tile(tile):
 
 
 def build_page(page):
-    """Normalize one page (id/title/connections + its tiles)."""
-    return {
+    """Normalize one page (id/title/connections + its tiles).
+
+    A resolved ``header`` dict (the docked brand banner, with its logo already
+    embedded as ``logo_uri``) is carried through verbatim when present.
+    """
+    out = {
         "id": page["id"],
         "title": page.get("title") or "Page",
         "connections": page.get("connections") or {},
         "tiles": [build_tile(t) for t in page.get("tiles", [])],
     }
+    if page.get("header"):
+        out["header"] = page["header"]
+    return out
 
 
-def build_model(grid, theme, active_page, pages, layers):
+def build_model(grid, theme, active_page, pages, layers, gap=0):
     """Assemble the final, embeddable export-model dict.
 
-    *grid* is a ``(cols, rows)`` pair; *theme* is ``Theme.to_dict()``; *pages*
-    is a list of page descriptors; *layers* maps layer id -> ``{fields,
-    features}``.
+    *grid* is a ``(cols, rows)`` pair; *gap* is the global element gap (logical
+    px) the browser insets each card by, mirroring the desktop spacing; *theme*
+    is ``Theme.to_dict()``; *pages* is a list of page descriptors; *layers* maps
+    layer id -> ``{fields, features}``.
     """
     cols, rows = grid
     return {
         "version": EXPORT_VERSION,
         "grid": {"cols": cols, "rows": rows},
+        "gap": max(0, int(gap or 0)),
         "theme": theme or {},
         "active_page": active_page,
         "pages": [build_page(p) for p in pages],

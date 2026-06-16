@@ -113,6 +113,24 @@ def _build_tile(tile, fid_indexes, skip_layers, map_uri):
         out["image_uri"] = image_data_uri(element.config.get("path"))
     elif element.type_name == "indicator":
         out["indicator_value"] = _indicator_baseline(element)
+        icon = element.config.get("icon_path")
+        if icon:
+            out["icon_uri"] = image_data_uri(icon)
+    return out
+
+
+def _build_header(window, page):
+    """Resolved header for *page* with its logo embedded as a data URI.
+
+    Returns ``None`` when the page shows no header.
+    """
+    cfg = window.header_for_page(page)
+    if not cfg:
+        return None
+    out = dict(cfg)
+    logo = (cfg.get("logo_path") or "").strip()
+    if logo:
+        out["logo_uri"] = image_data_uri(logo)
     return out
 
 
@@ -131,6 +149,7 @@ def export_dashboard(window, out_path, skip_layers=None):
             "title": page.title,
             "connections": window.bus.connections_to_dict(page.id),
             "tiles": tiles,
+            "header": _build_header(window, page),
         })
 
     current = window.current_page()
@@ -138,7 +157,8 @@ def export_dashboard(window, out_path, skip_layers=None):
         (window.canvas_cols(), window.canvas_rows()),
         window.bus.theme.to_dict(),
         current.id if current else None,
-        pages, layers_model)
+        pages, layers_model,
+        gap=window.canvas_gap())
 
     css_vars = theme_to_css_vars(model["theme"])
     runtime_css, runtime_js = load_assets()

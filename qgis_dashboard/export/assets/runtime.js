@@ -13,6 +13,10 @@
   var DEFAULT_SERIES = ["#2b7de9", "#13a10e", "#c19c00", "#d13438", "#8764b8",
     "#00b7c3", "#ca5010", "#498205", "#a4262c", "#5c2e91"];
   var SERIES = (THEME.series && THEME.series.length) ? THEME.series : DEFAULT_SERIES;
+  // global element gap (logical px): each card is inset by this much inside its
+  // footprint, mirroring the desktop's GridTile inset. The output can't be
+  // re-dragged, so this is the only way the export reflects the spacing.
+  var GAP = Math.max(0, Number(DATA.gap || 0));
   var NULL_KEY = "(null)";
   var SEP = String.fromCharCode(1);   // composite (row, col) cell-key separator
 
@@ -379,14 +383,73 @@
     return text.length > max ? text.slice(0, max - 1) + "…" : text;
   }
 
+  // ---- indicator value animations (mirror elements/indicator_anim.py) ----
+  // The page DOM is rebuilt on every filter change, so the previous numeric
+  // value is kept per tile id to drive odometer/rolling transitions.
+  var IND_LAST = {};
+  function easeOutCubic(t) { return 1 - Math.pow(1 - Math.min(Math.max(t, 0), 1), 3); }
+
+  function animateNumber(node, cfg, from, to, dur) {
+    var start = null;
+    function frame(ts) {
+      if (start === null) start = ts;
+      var t = Math.min((ts - start) / dur, 1);
+      node.textContent = fmtIndicator(cfg, from + (to - from) * easeOutCubic(t));
+      if (t < 1) requestAnimationFrame(frame); else node.textContent = fmtIndicator(cfg, to);
+    }
+    requestAnimationFrame(frame);
+  }
+  function animateTypewriter(node, text, dur) {
+    var start = null;
+    function frame(ts) {
+      if (start === null) start = ts;
+      var t = Math.min((ts - start) / dur, 1);
+      node.textContent = text.slice(0, Math.round(text.length * t));
+      if (t < 1) requestAnimationFrame(frame); else node.textContent = text;
+    }
+    requestAnimationFrame(frame);
+  }
+
   // ---- tile renderers ---------------------------------------------------
   function renderIndicator(body, tile, page) {
     var cfg = tile.config, rows = filteredRows(tile, page);
     var box = el("div", "dash-indicator");
     if (cfg.top_text) box.appendChild(el("div", "dash-ind-top", cfg.top_text));
+
     var live = evalAggregate(rows, cfg.value_expression || "count(1)");
     var value = (live === undefined) ? tile.indicator_value : live;
-    box.appendChild(el("div", "dash-ind-value", fmtIndicator(cfg, value)));
+    var text = fmtIndicator(cfg, value);
+
+    // value + optional icon (left / right / above)
+    var wrap = el("div", "dash-ind-valuewrap pos-" + (cfg.icon_position || "left"));
+    if (tile.icon_uri) {
+      var img = el("img", "dash-ind-icon");
+      img.src = tile.icon_uri;
+      var isz = cfg.icon_size || 48;
+      img.style.width = isz + "px"; img.style.height = isz + "px";
+      wrap.appendChild(img);
+    }
+    var valNode = el("div", "dash-ind-value");
+    if (cfg.value_size) valNode.style.fontSize = cfg.value_size + "px";
+    wrap.appendChild(valNode);
+    box.appendChild(wrap);
+
+    var mode = (cfg.animation || "").toLowerCase();
+    var dur = cfg.animation_duration_ms || 900;
+    var last = IND_LAST[tile.id];
+    if ((mode === "odometer" || mode === "rolling") && typeof value === "number"
+        && typeof last === "number" && last !== value) {
+      animateNumber(valNode, cfg, last, value, dur);
+    } else if (mode === "typewriter") {
+      animateTypewriter(valNode, text, dur);
+    } else if (mode === "fade") {
+      valNode.textContent = text;
+      valNode.classList.add("fade-in");
+    } else {
+      valNode.textContent = text;
+    }
+    if (typeof value === "number") IND_LAST[tile.id] = value;
+
     if (cfg.reference_expression && typeof value === "number") {
       var ref = evalAggregate(rows, cfg.reference_expression);
       if (typeof ref === "number") {
@@ -571,8 +634,14 @@
   function renderTile(tile, page) {
     var node = el("div", "dash-tile" + (FULL_BLEED[tile.type] ? " full-bleed" : ""));
     var g = tile.grid || {};
-    node.style.gridColumn = (Number(g.x || 0) + 1) + " / span " + Math.max(Number(g.w || 1), 1);
-    node.style.gridRow = (Number(g.y || 0) + 1) + " / span " + Math.max(Number(g.h || 1), 1);
+    // free-form layout: tiles carry a logical pixel rect (x, y, w, h). The card
+    // is inset by GAP on every side inside that footprint (matching the desktop
+    // GridTile inset) so adjacent cards always keep their breathing room.
+    node.style.position = "absolute";
+    node.style.left = (Number(g.x || 0) + GAP) + "px";
+    node.style.top = (Number(g.y || 0) + GAP) + "px";
+    node.style.width = Math.max(Number(g.w || 120) - 2 * GAP, 1) + "px";
+    node.style.height = Math.max(Number(g.h || 120) - 2 * GAP, 1) + "px";
 
     var showTitle = !FULL_BLEED[tile.type] && tile.type !== "text";
     if (showTitle) {
@@ -599,15 +668,80 @@
     return node;
   }
 
+  // ---- header (brand banner) -------------------------------------------
+  // Mirrors theme fallbacks so a chosen family degrades gracefully.
+  var FONT_FALLBACK = '"Segoe UI", "Helvetica Neue", Arial, sans-serif';
+
+  // anchor -> { css: flex-direction, bannerFirst } (mirror header_layout.box_direction)
+  function bannerDir(anchor) {
+    if (anchor === "bottom") return { css: "column", bannerFirst: false };
+    if (anchor === "left") return { css: "row", bannerFirst: true };
+    if (anchor === "right") return { css: "row", bannerFirst: false };
+    return { css: "column", bannerFirst: true };   // top (default)
+  }
+
+  function buildBanner(hdr) {
+    var banner = el("div", "dash-banner");
+    var vertical = (hdr.anchor === "top" || hdr.anchor === "bottom" || !hdr.anchor);
+    var thickness = Number(hdr.thickness || 80);
+    if (vertical) banner.style.height = thickness + "px";
+    else banner.style.width = thickness + "px";
+
+    var inner = el("div", "dash-banner-inner");
+    var slot = hdr.logo_slot || "left";
+    inner.style.flexDirection = (slot === "above" || slot === "below") ? "column" : "row";
+    var logoFirst = (slot === "left" || slot === "above");
+
+    var logo = null;
+    if (hdr.logo_uri) {
+      logo = el("img", "dash-banner-logo");
+      logo.src = hdr.logo_uri;
+      var sz = Number(hdr.logo_size || 40);
+      logo.style.width = sz + "px";
+      logo.style.height = sz + "px";
+    }
+    var title = el("div", "dash-banner-title", hdr.title || "");
+    if (hdr.font_family) title.style.fontFamily = '"' + hdr.font_family + '", ' + FONT_FALLBACK;
+    title.style.fontSize = Number(hdr.font_size || 22) + "px";
+    title.style.textAlign = hdr.align || "left";
+    title.style.flex = "1 1 auto";
+
+    if (logo && logoFirst) inner.appendChild(logo);
+    inner.appendChild(title);
+    if (logo && !logoFirst) inner.appendChild(logo);
+    banner.appendChild(inner);
+    return banner;
+  }
+
+  function buildGrid(page) {
+    var grid = el("div", "dash-grid");
+    // size the surface to the content extent so it scrolls when it overflows
+    var maxR = 0, maxB = 0;
+    page.tiles.forEach(function (tile) {
+      var g = tile.grid || {};
+      maxR = Math.max(maxR, Number(g.x || 0) + Math.max(Number(g.w || 0), 0));
+      maxB = Math.max(maxB, Number(g.y || 0) + Math.max(Number(g.h || 0), 0));
+    });
+    grid.style.width = (maxR + 12) + "px";
+    grid.style.height = (maxB + 12) + "px";
+    page.tiles.forEach(function (tile) { grid.appendChild(renderTile(tile, page)); });
+    return grid;
+  }
+
   function renderPage(page) {
     CHART_HOSTS = [];
-    var mount = document.getElementById("page-mount");
-    mount.innerHTML = "";
-    var grid = el("div", "dash-grid");
-    grid.style.gridTemplateColumns = "repeat(" + DATA.grid.cols + ", 1fr)";
-    grid.style.gridTemplateRows = "repeat(" + DATA.grid.rows + ", 1fr)";
-    page.tiles.forEach(function (tile) { grid.appendChild(renderTile(tile, page)); });
-    mount.appendChild(grid);
+    var area = document.getElementById("page-area");
+    area.innerHTML = "";
+    var wrap = el("div", "dash-pagewrap");
+    var hdr = page.header;
+    var dir = hdr ? bannerDir(hdr.anchor) : null;
+    if (dir) wrap.style.flexDirection = dir.css;
+    var scroll = el("div", "dash-scroll");
+    scroll.appendChild(buildGrid(page));
+    if (hdr && dir.bannerFirst) wrap.appendChild(buildBanner(hdr));
+    wrap.appendChild(scroll);
+    if (hdr && !dir.bannerFirst) wrap.appendChild(buildBanner(hdr));
+    area.appendChild(wrap);
     // charts need their host measured after layout
     requestAnimationFrame(function () {
       CHART_HOSTS.forEach(function (c) { drawChart(c.host, c.tile, c.page); });
@@ -638,11 +772,9 @@
       });
       app.appendChild(tabs);
     }
-    var pageHost = el("div", "dash-page");
-    var mount = el("div"); mount.id = "page-mount";
-    mount.style.height = "100%";
-    pageHost.appendChild(mount);
-    app.appendChild(pageHost);
+    var area = el("div", "dash-page-area");
+    area.id = "page-area";
+    app.appendChild(area);
 
     var start = DATA.pages.filter(function (p) { return p.id === DATA.active_page; })[0] || DATA.pages[0];
     if (start) showPage(start);

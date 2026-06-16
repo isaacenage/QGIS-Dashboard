@@ -9,6 +9,7 @@ from .map_element import MapElement
 from .category_selector import CategorySelectorElement
 from .text_element import TextElement
 from .image_element import ImageElement
+from .header import HeaderElement
 
 ELEMENT_TYPES = {
     cls.type_name: cls for cls in (
@@ -20,6 +21,7 @@ ELEMENT_TYPES = {
         CategorySelectorElement,
         TextElement,
         ImageElement,
+        HeaderElement,
     )
 }
 
@@ -33,6 +35,7 @@ ELEMENT_LABELS = {
     "category_selector": "Category selector",
     "text": "Text / heading",
     "image": "Image",
+    "header": "Header (brand banner)",
 }
 
 

@@ -200,7 +200,7 @@ class TextElementTest(unittest.TestCase):
         el = create_element("text", self._bus(),
                             {"text": "Heading", "align": "center"})
         self.assertEqual(el._label.text(), "Heading")
-        self.assertTrue(el._label.alignment() & Qt.AlignHCenter)
+        self.assertTrue(el._label.alignment() & Qt.AlignmentFlag.AlignHCenter)
 
     def test_empty_text_shows_placeholder(self):
         from elements import create_element
@@ -333,6 +333,14 @@ class MigrateLayoutTest(unittest.TestCase):
         self.assertEqual(len(data["pages"]), 1)
         self.assertEqual(data["pages"][0]["elements"], [])
 
+    def test_gap_defaults_to_zero_when_absent(self):
+        data = migrate_layout([{"__type__": "indicator", "id": "a"}])
+        self.assertEqual(data["gap"], 0)
+
+    def test_gap_passes_through(self):
+        data = migrate_layout({"version": 3, "gap": 16, "pages": []})
+        self.assertEqual(data["gap"], 16)
+
 
 class MultiPageWindowTest(unittest.TestCase):
     def _win(self):
@@ -367,6 +375,106 @@ class MultiPageWindowTest(unittest.TestCase):
         last = win.pages()[0]
         win.delete_page(last.id)
         self.assertEqual(len(win.pages()), 1)
+
+
+class HeaderLayoutTest(unittest.TestCase):
+    """Pure layout helpers for the header banner."""
+
+    def test_box_direction_per_anchor(self):
+        from elements.header_layout import box_direction
+        self.assertEqual(box_direction("top"), ("v", True))
+        self.assertEqual(box_direction("bottom"), ("v", False))
+        self.assertEqual(box_direction("left"), ("h", True))
+        self.assertEqual(box_direction("right"), ("h", False))
+        self.assertEqual(box_direction("nonsense"), ("v", True))  # falls back to top
+
+    def test_inner_box_direction_per_slot(self):
+        from elements.header_layout import inner_box_direction
+        self.assertEqual(inner_box_direction("left"), ("h", True))
+        self.assertEqual(inner_box_direction("right"), ("h", False))
+        self.assertEqual(inner_box_direction("above"), ("v", True))
+        self.assertEqual(inner_box_direction("below"), ("v", False))
+
+    def test_resolve_header_page_overrides_global(self):
+        from elements.header_layout import resolve_header
+        page = {"title": "Page banner"}
+        glob = {"title": "Global banner"}
+        self.assertIs(resolve_header(page, glob), page)
+        self.assertIs(resolve_header(None, glob), glob)
+        self.assertIsNone(resolve_header(None, None))
+
+
+class HeaderElementTest(unittest.TestCase):
+    def _bus(self):
+        bus = DashboardBus()
+        bus.set_active_page("A")
+        return bus
+
+    def test_factory_and_roles(self):
+        from elements import create_element
+        from elements.header import HeaderElement
+        el = create_element("header", self._bus(), {"title": "Acme"})
+        self.assertIsInstance(el, HeaderElement)
+        self.assertFalse(el.is_filter_source)
+        self.assertFalse(el.accepts_filter)
+
+    def test_renders_title(self):
+        from elements import create_element
+        el = create_element("header", self._bus(), {"title": "Acme Corp"})
+        self.assertEqual(el._title.text(), "Acme Corp")
+
+
+class AddElementHeaderDialogTest(unittest.TestCase):
+    def _select(self, dlg, type_name):
+        i = dlg.type_combo.findData(type_name)
+        dlg.type_combo.setCurrentIndex(i)
+
+    def test_header_hides_layer_row_and_returns_config(self):
+        from add_element_dialog import AddElementDialog
+        dlg = AddElementDialog()
+        self._select(dlg, "header")
+        self.assertTrue(dlg.layer_combo.isHidden())
+        dlg.title_edit.setText("Brand")
+        dlg._dyn["scope_all_pages"].setChecked(True)
+        t, cfg = dlg.result_config()
+        self.assertEqual(t, "header")
+        self.assertEqual(cfg["title"], "Brand")
+        self.assertTrue(cfg["scope_all_pages"])
+        self.assertIn("anchor", cfg)
+        self.assertIn("font_family", cfg)
+        self.assertNotIn("layer_id", cfg)
+
+
+class WindowHeaderTest(unittest.TestCase):
+    def _win(self):
+        return DashboardWindow(IFACE)
+
+    def test_per_page_header_only_on_that_page(self):
+        win = self._win()
+        win.add_page("Second")
+        # current page is the second one
+        win.add_element("header", {"title": "Local", "scope_all_pages": False})
+        cur = win.current_page()
+        self.assertEqual(cur.header_config["title"], "Local")
+        self.assertIsNone(win.pages()[0].header_config)
+        self.assertIsNotNone(cur.view.header())
+        self.assertIsNone(win.pages()[0].view.header())
+
+    def test_global_header_resolves_on_all_pages(self):
+        win = self._win()
+        win.add_page("Second")
+        win.add_element("header", {"title": "Brand", "scope_all_pages": True})
+        for page in win.pages():
+            self.assertEqual(win.header_for_page(page)["title"], "Brand")
+            self.assertIsNotNone(page.view.header())
+
+    def test_page_header_overrides_global(self):
+        win = self._win()
+        first = win.pages()[0]
+        win.add_element("header", {"title": "Brand", "scope_all_pages": True})
+        first.header_config = {"title": "Local"}
+        win._refresh_all_headers()
+        self.assertEqual(win.header_for_page(first)["title"], "Local")
 
 
 class ThemeChromeTest(unittest.TestCase):

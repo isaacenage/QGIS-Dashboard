@@ -39,7 +39,7 @@ class ImageElement(DashboardElement):
 
         self._label = QLabel("")
         self._label.setObjectName("imageTile")
-        self._label.setAlignment(Qt.AlignCenter)
+        self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._label.setMinimumSize(1, 1)
         self.body.addWidget(self._label, 1)
 
@@ -110,10 +110,10 @@ class ImageElement(DashboardElement):
         if size.width() <= 0 or size.height() <= 0:
             return
         stretch = self.config.get("fit") == "stretch"
-        mode = Qt.IgnoreAspectRatio if stretch else Qt.KeepAspectRatio
+        mode = Qt.AspectRatioMode.IgnoreAspectRatio if stretch else Qt.AspectRatioMode.KeepAspectRatio
         if self._pixmap is not None:
             self._label.setPixmap(self._pixmap.scaled(
-                size, mode, Qt.SmoothTransformation))
+                size, mode, Qt.TransformationMode.SmoothTransformation))
         elif self._svg is not None:
             self._label.setPixmap(self._render_svg(size, stretch))
         elif self._movie is not None:
@@ -124,11 +124,11 @@ class ImageElement(DashboardElement):
             target = size
         else:
             intrinsic = self._svg.defaultSize()    # QSize, the SVG's own size
-            target = (intrinsic.scaled(size, Qt.KeepAspectRatio)
+            target = (intrinsic.scaled(size, Qt.AspectRatioMode.KeepAspectRatio)
                       if intrinsic.width() and intrinsic.height() else size)
         img = QImage(max(target.width(), 1), max(target.height(), 1),
-                     QImage.Format_ARGB32)
-        img.fill(Qt.transparent)
+                     QImage.Format.Format_ARGB32)
+        img.fill(Qt.GlobalColor.transparent)
         painter = QPainter(img)
         self._svg.render(painter)
         painter.end()
@@ -138,7 +138,7 @@ class ImageElement(DashboardElement):
         frame = self._movie.currentImage().size()
         if stretch or not frame.width() or not frame.height():
             return size
-        return frame.scaled(size, Qt.KeepAspectRatio)
+        return frame.scaled(size, Qt.AspectRatioMode.KeepAspectRatio)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

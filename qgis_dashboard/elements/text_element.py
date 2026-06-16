@@ -18,9 +18,9 @@ from qgis.core import QgsProject
 from .base import DashboardElement
 
 _ALIGN = {
-    "left": Qt.AlignLeft | Qt.AlignVCenter,
-    "center": Qt.AlignCenter,
-    "right": Qt.AlignRight | Qt.AlignVCenter,
+    "left": Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+    "center": Qt.AlignmentFlag.AlignCenter,
+    "right": Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
 }
 
 _PLACEHOLDER = "Double-click to edit text"
@@ -41,7 +41,7 @@ class TextElement(DashboardElement):
         self._label.setObjectName("textTile")
         self._label.setWordWrap(True)
         self._label.setMinimumSize(1, 1)
-        self._label.setTextInteractionFlags(Qt.NoTextInteraction)
+        self._label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         self.body.addWidget(self._label, 1)
 
         self.apply_theme()

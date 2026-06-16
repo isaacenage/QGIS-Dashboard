@@ -6,6 +6,7 @@
 [general]
 name=QGIS Dashboard
 qgisMinimumVersion=3.22
+qgisMaximumVersion=4.99
 description=Build ArcGIS-Dashboards-style interactive dashboards from your QGIS project layers — indicators, charts, lists, a live map element, and cross-filtering selectors all wired together through a signal bus.
 version=0.1
 author=Isaac Enage
@@ -30,7 +31,7 @@ homepage=http://homepage
 category=Plugins
 icon=icon.png
 # experimental flag
-experimental=True
+experimental=False
 
 # deprecated flag (applies to the whole plugin, not just a single version)
 deprecated=False

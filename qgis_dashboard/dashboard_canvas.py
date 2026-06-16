@@ -1,29 +1,38 @@
 # -*- coding: utf-8 -*-
-"""Dashboard canvas — free drag/resize layout on a snap grid.
+"""Dashboard canvas — free-form drag/resize layout (no grid).
 
-Replaces the old fixed wrapping ``QGridLayout``. Tiles are absolutely
-positioned children of the canvas; each remembers its placement in *cell*
-units (gx, gy, gw, gh). The pixel size of a cell is ``width/cols`` x
-``height/rows``, so resizing the window (or changing the grid in Settings)
-rescales every tile while preserving its grid placement.
+Modelled on the Summarizer plugin's canvas: tiles are absolutely-positioned
+children of the canvas that remember their placement in **logical pixels**
+(``x, y, w, h`` at zoom 1.0) — there are no cells, no ``cols``/``rows``, and no
+``QGridLayout``. The canvas applies the page's zoom factor when placing a tile
+(``display = logical x zoom``) and grows its own surface to contain every tile
+so the surrounding scroll area can pan it.
 
-The user drags a tile by its header strip and resizes via the bottom-right
-grip; on release the tile snaps to the nearest cells, is clamped inside the
-grid, and reverts if it would overlap another tile. Faint grid guides are
-painted so the otherwise-invisible snap grid is discoverable.
+The user drags a tile by its header strip and resizes via the 8 handles; on
+release the rect is snapped to an 8px step, clamped so the origin stays on the
+surface, and **reverts if it would overlap** another tile (the one spatial
+constraint kept from the old grid). Zoom is owned per-page by :class:`PageView`,
+which calls :meth:`DashboardCanvas.set_zoom`.
 """
 
-from qgis.PyQt.QtCore import Qt, QRect, QPoint, QPointF, pyqtSignal
-from qgis.PyQt.QtGui import QPainter, QColor
+from qgis.PyQt.QtCore import Qt, QPoint, QPointF, pyqtSignal
+from qgis.PyQt.QtGui import QPainter, QColor, QPixmap, QRegion
 from qgis.PyQt.QtWidgets import QWidget, QFrame, QVBoxLayout, QToolButton, QMenu
 
-GAP = 4              # px gutter between tiles
 HEADER_H = 20        # px drag strip height
 GRIP = 16            # px resize grip square
+SNAP = 8             # px snap step applied on drag/resize release
+MARGIN = 12          # px breathing room kept around content when growing
+MIN_TILE = 120       # px minimum tile width/height (logical)
+DEFAULT_W = 320      # px default new-tile size (logical)
+DEFAULT_H = 240
+MAP_W = 480          # px default size for the (larger) map tile
+MAP_H = 380
 
 
-def _snap(px, cell):
-    return int(round(px / cell)) if cell else 0
+def _snap(px, step=SNAP):
+    step = step or 1
+    return int(round(px / float(step))) * step
 
 
 def _proposed_resize(edge, start_geom, dx, dy, min_px=40):
@@ -60,12 +69,12 @@ class _DragHandle(QWidget):
     def __init__(self, tile):
         super().__init__(tile)
         self._tile = tile
-        self.setCursor(Qt.SizeAllCursor)
+        self.setCursor(Qt.CursorShape.SizeAllCursor)
         self.setToolTip("Drag to move")
         self._origin = None
 
     def mousePressEvent(self, e):
-        if e.button() == Qt.LeftButton:
+        if e.button() == Qt.MouseButton.LeftButton:
             self._origin = e.globalPos()
             self._tile.begin_move()
 
@@ -80,10 +89,10 @@ class _DragHandle(QWidget):
 
 
 EDGE_CURSORS = {
-    "n": Qt.SizeVerCursor, "s": Qt.SizeVerCursor,
-    "e": Qt.SizeHorCursor, "w": Qt.SizeHorCursor,
-    "nw": Qt.SizeFDiagCursor, "se": Qt.SizeFDiagCursor,
-    "ne": Qt.SizeBDiagCursor, "sw": Qt.SizeBDiagCursor,
+    "n": Qt.CursorShape.SizeVerCursor, "s": Qt.CursorShape.SizeVerCursor,
+    "e": Qt.CursorShape.SizeHorCursor, "w": Qt.CursorShape.SizeHorCursor,
+    "nw": Qt.CursorShape.SizeFDiagCursor, "se": Qt.CursorShape.SizeFDiagCursor,
+    "ne": Qt.CursorShape.SizeBDiagCursor, "sw": Qt.CursorShape.SizeBDiagCursor,
 }
 
 
@@ -98,7 +107,7 @@ class _ResizeHandle(QWidget):
         self._origin = None
 
     def mousePressEvent(self, e):
-        if e.button() == Qt.LeftButton:
+        if e.button() == Qt.MouseButton.LeftButton:
             self._origin = e.globalPos()
             self._tile.begin_resize()
 
@@ -124,22 +133,27 @@ class _ResizeHandle(QWidget):
 
 
 class GridTile(QFrame):
-    """A draggable / resizable container wrapping one dashboard element."""
+    """A draggable / resizable container wrapping one dashboard element.
+
+    Stores its placement in logical pixels (``x_px, y_px, w_px, h_px``); the
+    canvas scales these by the active zoom when placing the widget.
+    """
 
     closeRequested = pyqtSignal(object)        # emits the wrapped element
     styleRequested = pyqtSignal(object)        # emits the wrapped element
     connectionsRequested = pyqtSignal(object)  # emits the wrapped element
-    geometryCommitted = pyqtSignal()           # grid rect changed (persist)
+    configureRequested = pyqtSignal(object)    # emits the wrapped element
+    geometryCommitted = pyqtSignal()           # pixel rect changed (persist)
 
-    def __init__(self, canvas, element, grid_rect):
+    def __init__(self, canvas, element, pixel_rect):
         super().__init__(canvas)
         self.canvas = canvas
         self.element = element
         # back-reference so full-bleed elements (e.g. the map) can drive their
         # own move via the tile API — see elements/map_element._TileMapCanvas
         setattr(element, "_grid_tile", self)
-        self.gx, self.gy, self.gw, self.gh = grid_rect
-        self._prev = grid_rect
+        self.x_px, self.y_px, self.w_px, self.h_px = pixel_rect
+        self._prev = tuple(pixel_rect)
         self.setObjectName("tileWrap")
         self.setStyleSheet("#tileWrap { background:transparent; }")
 
@@ -148,6 +162,7 @@ class GridTile(QFrame):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
         lay.addWidget(element)
+        self._content_lay = lay   # the global "element gap" is applied here
 
         self.header = _DragHandle(self)   # transparent top strip, drag to move
 
@@ -155,7 +170,7 @@ class GridTile(QFrame):
         self.close_btn.setObjectName("tileClose")
         self.close_btn.setText("✕")
         self.close_btn.setAutoRaise(True)
-        self.close_btn.setCursor(Qt.PointingHandCursor)
+        self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.close_btn.setToolTip("Remove tile")
         self.close_btn.clicked.connect(lambda: self.closeRequested.emit(self.element))
 
@@ -163,28 +178,72 @@ class GridTile(QFrame):
         self.style_btn.setObjectName("tileClose")
         self.style_btn.setText("⚙")
         self.style_btn.setAutoRaise(True)
-        self.style_btn.setCursor(Qt.PointingHandCursor)
+        self.style_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.style_btn.setToolTip("Tile appearance")
         self.style_btn.clicked.connect(lambda: self.styleRequested.emit(self.element))
 
         self._handles = {edge: _ResizeHandle(self, edge)
                          for edge in ("n", "s", "e", "w",
                                       "nw", "ne", "sw", "se")}
+        self._locked = False   # layout lock: when True, no move/resize
+        self._active = False   # a move/resize gesture is in progress
 
     def contextMenuEvent(self, event):
-        """Right-click a tile to edit its connections / appearance / removal."""
+        """Right-click a tile to configure / wire / restyle / remove it."""
         menu = QMenu(self)
-        menu.addAction("Connections…").triggered.connect(
+        menu.addAction("Configure").triggered.connect(
+            lambda: self.configureRequested.emit(self.element))
+        menu.addAction("Connections").triggered.connect(
             lambda: self.connectionsRequested.emit(self.element))
-        menu.addAction("Tile appearance…").triggered.connect(
+        menu.addAction("Tile appearance").triggered.connect(
             lambda: self.styleRequested.emit(self.element))
         menu.addSeparator()
         menu.addAction("Remove tile").triggered.connect(
             lambda: self.closeRequested.emit(self.element))
-        menu.exec_(event.globalPos())
+        menu.exec(event.globalPos())
 
     def grid_rect(self):
-        return (self.gx, self.gy, self.gw, self.gh)
+        """The tile's logical pixel placement ``(x, y, w, h)``."""
+        return (self.x_px, self.y_px, self.w_px, self.h_px)
+
+    def set_inset(self, px):
+        """Inset the element card within the tile footprint by *px* display px.
+
+        This is how the global element-gap setting is rendered: the tile
+        footprint is unchanged (drag / resize / overlap still act on it), but
+        the card shrinks inside it, leaving transparent breathing room around
+        every element so adjacent cards never visually touch. ``px`` is already
+        scaled for the current zoom by the canvas (see ``DashboardCanvas``).
+        """
+        px = max(0, int(px))
+        self._content_lay.setContentsMargins(px, px, px, px)
+
+    def set_chrome_visible(self, on):
+        """Show/hide the editing chrome (drag strip, buttons, resize handles).
+
+        Hidden while the canvas is grabbed for a PNG/PDF export so the saved
+        image shows only the clean tiles, not the editing affordances. When
+        restoring, the move/resize affordances only reappear if the layout is
+        not locked.
+        """
+        self.close_btn.setVisible(on)
+        self.style_btn.setVisible(on)
+        interactive = on and not self._locked
+        self.header.setVisible(interactive)
+        for h in self._handles.values():
+            h.setVisible(interactive)
+
+    def set_locked(self, locked):
+        """Lock/unlock this tile's layout: hide the drag strip + resize handles.
+
+        Locking only affects moving/resizing — the tile still renders and its
+        element stays interactive (e.g. clicking a chart to cross-filter).
+        """
+        self._locked = bool(locked)
+        interactive = not self._locked
+        self.header.setVisible(interactive)
+        for h in self._handles.values():
+            h.setVisible(interactive)
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
@@ -211,97 +270,190 @@ class GridTile(QFrame):
             self._handles[edge].setGeometry(hx, hy, t, t)
 
     # ---- move ----
+    # ``_active`` gates the whole gesture so every entry point — the drag
+    # handle *and* the map tile's own canvas (which calls these directly) —
+    # respects the layout lock.
 
     def begin_move(self):
+        if self._locked:
+            self._active = False
+            return
+        self._active = True
         self._prev = self.grid_rect()
         self._start_pos = self.pos()
         self.raise_()
         self.canvas.show_guides(True)
 
     def move_by(self, delta):
-        self.move(self._start_pos + delta)
+        if not self._active:
+            return
+        # clamp the live drag so the tile can never leave the canvas surface —
+        # it stops at the left/right/top/bottom edge instead of disappearing
+        target = self._start_pos + delta
+        max_x = max(self.canvas.width() - self.width(), 0)
+        max_y = max(self.canvas.height() - self.height(), 0)
+        self.move(min(max(target.x(), 0), max_x),
+                  min(max(target.y(), 0), max_y))
 
     def end_move(self):
-        cw, ch = self.canvas.cell_size()
-        gx = self.canvas.clamp(_snap(self.x(), cw), self.gw, self.canvas.cols)
-        gy = self.canvas.clamp(_snap(self.y(), ch), self.gh, self.canvas.rows)
-        self._commit_or_revert((gx, gy, self.gw, self.gh))
+        if not self._active:
+            return
+        self._active = False
+        z = self.canvas.zoom() or 1.0
+        lw, lh = self.w_px, self.h_px
+        lcw, lch = self.canvas.logical_size()
+        max_lx = max(int(round(lcw - lw)), 0)
+        max_ly = max(int(round(lch - lh)), 0)
+        lx = min(max(_snap(self.x() / z), 0), max_lx)
+        ly = min(max(_snap(self.y() / z), 0), max_ly)
+        self._commit_or_revert((lx, ly, lw, lh))
 
     # ---- resize ----
 
     def begin_resize(self):
+        if self._locked:
+            self._active = False
+            return
+        self._active = True
         self._prev = self.grid_rect()
         self._start_geom = (self.x(), self.y(), self.width(), self.height())
         self.raise_()
         self.canvas.show_guides(True)
 
     def resize_by(self, edge, dx, dy):
-        x, y, w, h = _proposed_resize(edge, self._start_geom, dx, dy)
+        if not self._active:
+            return
+        # work in display pixels; floor at the tile minimum scaled by zoom
+        z = self.canvas.zoom() or 1.0
+        min_disp = max(GRIP, int(round(MIN_TILE * z)))
+        x, y, w, h = _proposed_resize(edge, self._start_geom, dx, dy, min_px=min_disp)
         self.setGeometry(x, y, w, h)
 
     def end_resize(self):
-        cw, ch = self.canvas.cell_size()
-        gx = max(_snap(self.x(), cw), 0)
-        gy = max(_snap(self.y(), ch), 0)
-        gw = max(_snap(self.width(), cw), 1)
-        gh = max(_snap(self.height(), ch), 1)
-        gw = min(gw, self.canvas.cols - gx)
-        gh = min(gh, self.canvas.rows - gy)
-        self._commit_or_revert((gx, gy, gw, gh))
+        if not self._active:
+            return
+        self._active = False
+        z = self.canvas.zoom() or 1.0
+        lx = max(0, _snap(self.x() / z))
+        ly = max(0, _snap(self.y() / z))
+        lw = max(MIN_TILE, _snap(self.width() / z))
+        lh = max(MIN_TILE, _snap(self.height() / z))
+        self._commit_or_revert((lx, ly, lw, lh))
 
     def _commit_or_revert(self, new_rect):
         self.canvas.show_guides(False)
         if self.canvas.rect_free(new_rect, ignore=self):
-            self.gx, self.gy, self.gw, self.gh = new_rect
+            self.x_px, self.y_px, self.w_px, self.h_px = new_rect
             self.canvas.place(self)
+            self.canvas.sync_size()
             if new_rect != self._prev:
                 self.geometryCommitted.emit()
         else:
-            self.canvas.place(self)   # snap back to current grid rect
+            self.canvas.place(self)   # snap back to current pixel rect
 
 
 class DashboardCanvas(QWidget):
-    """Holds GridTiles and enforces the snap grid."""
+    """Holds GridTiles in a free-form (overlap-free) pixel layout."""
 
     layoutChanged = pyqtSignal()         # a tile moved/resized/added/removed
-    gridSettingsRequested = pyqtSignal()  # user asked to edit the snap grid
 
     def __init__(self, bus, cols=12, rows=8, parent=None):
         super().__init__(parent)
         self.bus = bus
+        # ``cols``/``rows`` are no longer used for layout (tiles are free-form
+        # pixels); they are retained only as harmless persisted metadata so the
+        # save/restore plumbing and older signatures keep working.
         self.cols = max(int(cols), 1)
         self.rows = max(int(rows), 1)
         self._tiles = []
         self._guides = False
+        self._zoom = 1.0
+        self._locked = False
+        # global element gap (logical px): transparent breathing room inset
+        # around every tile's card. 0 == cards may sit edge to edge.
+        self.gap = 0
         self.setObjectName("dashCanvas")
         self.setMinimumSize(480, 360)
         if bus is not None:
             bus.themeChanged.connect(self.update)
 
-    # ---- context menu ----
+    # ---- layout lock ----
 
-    def contextMenuEvent(self, event):
-        """Right-click the canvas to edit the (global) snap-grid resolution."""
-        menu = QMenu(self)
-        menu.addAction("Grid settings…").triggered.connect(
-            self.gridSettingsRequested.emit)
-        menu.exec_(event.globalPos())
+    def is_locked(self):
+        return self._locked
+
+    def set_locked(self, locked):
+        """Lock/unlock moving + resizing of every tile on this canvas."""
+        self._locked = bool(locked)
+        for t in self._tiles:
+            t.set_locked(self._locked)
+
+    # ---- zoom ----
+
+    def zoom(self):
+        return self._zoom
+
+    def set_zoom(self, z):
+        self._zoom = max(0.05, float(z))
+        self.reflow()
+        self.sync_size()
+        self.update()
+
+    # ---- element gap (global spacing) ----
+
+    def set_gap(self, px):
+        """Set the global element gap (logical px) and re-apply it live.
+
+        The gap is rendered as a transparent inset around each tile's card, so
+        adjacent elements always keep this breathing room no matter how they
+        are dragged. Re-placing every tile picks up the new inset.
+        """
+        self.gap = max(0, int(px))
+        self.reflow()
+        self.update()
+
+    def _tile_inset(self):
+        """The card inset in display pixels (the gap scaled by the zoom)."""
+        return int(round(self.gap * (self._zoom or 1.0)))
 
     # ---- geometry helpers ----
-
-    def cell_size(self):
-        return (self.width() / float(self.cols), self.height() / float(self.rows))
-
-    @staticmethod
-    def clamp(value, span, total):
-        return max(0, min(value, total - span))
 
     def tiles(self):
         return list(self._tiles)
 
+    def _viewport_size(self):
+        """Visible size to fill — the host scroll area's viewport when present."""
+        p = self.parentWidget()
+        if p is not None and p.width() > 0 and p.height() > 0:
+            return p.width(), p.height()
+        return max(self.width(), 800), max(self.height(), 600)
+
+    def _logical_viewport(self):
+        z = self._zoom or 1.0
+        vw, vh = self._viewport_size()
+        return vw / z, vh / z
+
+    def logical_size(self):
+        """The canvas surface size in logical (zoom-1.0) pixels.
+
+        Used to clamp tile placement so a tile stays fully on the surface.
+        """
+        z = self._zoom or 1.0
+        return self.width() / z, self.height() / z
+
+    def _content_extent(self):
+        """Right/bottom extent of all tiles, in logical pixels."""
+        max_r = max_b = 0
+        for t in self._tiles:
+            x, y, w, h = t.grid_rect()
+            max_r = max(max_r, x + w)
+            max_b = max(max_b, y + h)
+        return max_r, max_b
+
     def rect_free(self, rect, ignore=None):
+        """True if *rect* (logical px) is on-surface and overlaps no other tile."""
         x, y, w, h = rect
-        if x < 0 or y < 0 or x + w > self.cols or y + h > self.rows:
+        if x < 0 or y < 0:
             return False
         for t in self._tiles:
             if t is ignore:
@@ -312,26 +464,40 @@ class DashboardCanvas(QWidget):
         return True
 
     def first_free(self, w, h):
-        w = min(w, self.cols)
-        h = min(h, self.rows)
-        for y in range(self.rows):
-            for x in range(self.cols):
+        """Find a non-overlapping origin for a *w*x*h* tile (logical px)."""
+        step = 20
+        lvw, lvh = self._logical_viewport()
+        max_x = max(int(lvw - w), 0)
+        max_y = max(int(lvh - h), 0)
+        y = 0
+        while y <= max_y:
+            x = 0
+            while x <= max_x:
                 if self.rect_free((x, y, w, h)):
                     return (x, y, w, h)
-        return (0, 0, w, h)   # last resort: overlap at origin
+                x += step
+            y += step
+        # surface is packed: cascade from the origin so the new tile is visible
+        n = len(self._tiles)
+        off = MARGIN + (n * 28) % 240
+        return (off, off, w, h)
 
     # ---- tile lifecycle ----
 
-    def add_tile(self, element, grid_rect=None):
-        if grid_rect is None:
-            default = (6, 5) if getattr(element, "type_name", "") == "map" else (4, 3)
-            grid_rect = self.first_free(*default)
-        tile = GridTile(self, element, grid_rect)
+    def add_tile(self, element, pixel_rect=None):
+        if pixel_rect is None:
+            if getattr(element, "type_name", "") == "map":
+                pixel_rect = self.first_free(MAP_W, MAP_H)
+            else:
+                pixel_rect = self.first_free(DEFAULT_W, DEFAULT_H)
+        tile = GridTile(self, element, pixel_rect)
         tile.closeRequested.connect(self._on_close)
         tile.geometryCommitted.connect(self.layoutChanged)
+        tile.set_locked(self._locked)   # honour the canvas's current lock state
         self._tiles.append(tile)
         tile.show()
         self.place(tile)
+        self.sync_size()
         self.layoutChanged.emit()
         return tile
 
@@ -344,6 +510,7 @@ class DashboardCanvas(QWidget):
                 t.deleteLater()
                 if self.bus is not None:
                     self.bus.forget_element(getattr(element, "id", None))
+                self.sync_size()
                 self.layoutChanged.emit()
                 return
 
@@ -356,34 +523,82 @@ class DashboardCanvas(QWidget):
         self.layoutChanged.emit()
 
     def place(self, tile):
-        cw, ch = self.cell_size()
-        x = int(round(tile.gx * cw)) + GAP
-        y = int(round(tile.gy * ch)) + GAP
-        w = int(round(tile.gw * cw)) - 2 * GAP
-        h = int(round(tile.gh * ch)) - 2 * GAP
-        tile.setGeometry(x, y, max(w, 1), max(h, 1))
+        """Position one tile at ``logical x zoom`` display pixels."""
+        z = self._zoom or 1.0
+        x, y, w, h = tile.grid_rect()
+        tile.setGeometry(int(round(x * z)), int(round(y * z)),
+                         max(int(round(w * z)), 1), max(int(round(h * z)), 1))
+        tile.set_inset(self._tile_inset())
 
     def reflow(self):
         for t in self._tiles:
             self.place(t)
 
+    def sync_size(self):
+        """Grow the surface so it contains all tiles (and fills the viewport)."""
+        z = self._zoom or 1.0
+        max_r, max_b = self._content_extent()
+        lvw, lvh = self._logical_viewport()
+        lw = max(lvw, max_r + MARGIN)
+        lh = max(lvh, max_b + MARGIN)
+        w = int(round(lw * z))
+        h = int(round(lh * z))
+        if (self.minimumWidth(), self.minimumHeight()) != (w, h):
+            self.setMinimumSize(w, h)
+            self.resize(w, h)
+
     def set_grid(self, cols, rows):
+        """Retained for compatibility: store metadata, re-place tiles.
+
+        The grid no longer drives layout — tiles keep their pixel placement —
+        so this only refreshes the stored ``cols``/``rows`` and reflows.
+        """
         self.cols = max(int(cols), 1)
         self.rows = max(int(rows), 1)
-        # clamp any tile that now falls outside the smaller grid
-        for t in self._tiles:
-            gw = min(t.gw, self.cols)
-            gh = min(t.gh, self.rows)
-            gx = min(t.gx, self.cols - gw)
-            gy = min(t.gy, self.rows - gh)
-            t.gx, t.gy, t.gw, t.gh = gx, gy, gw, gh
         self.reflow()
+        self.sync_size()
         self.update()
         self.layoutChanged.emit()
 
     def show_guides(self, on):
         self._guides = on
         self.update()
+
+    # ---- export ----
+
+    def export_pixmap(self, scale=2.0):
+        """Render the whole content surface to a high-res QPixmap.
+
+        Exports at the logical layout (zoom 1.0) regardless of the current
+        view zoom, with the editing chrome hidden, so the result is a clean
+        image of the dashboard at *scale*x device resolution (crisp for PNG /
+        PDF). The live view's zoom and chrome are restored afterwards.
+        """
+        old_zoom = self._zoom
+        zoom_changed = abs(old_zoom - 1.0) > 1e-6
+        self.show_guides(False)
+        for t in self._tiles:
+            t.set_chrome_visible(False)
+        try:
+            if zoom_changed:
+                self.set_zoom(1.0)   # reflows + grows the surface to content
+            else:
+                self.sync_size()
+            max_r, max_b = self._content_extent()
+            w = max(int(round(max_r + MARGIN)), 1)
+            h = max(int(round(max_b + MARGIN)), 1)
+            scale = max(0.5, float(scale))
+            pm = QPixmap(int(round(w * scale)), int(round(h * scale)))
+            pm.setDevicePixelRatio(scale)
+            theme = self.bus.theme if self.bus is not None else None
+            pm.fill(QColor(theme.window_bg) if theme else QColor("#f4f6f8"))
+            self.render(pm, QPoint(0, 0), QRegion(0, 0, w, h))
+            return pm
+        finally:
+            for t in self._tiles:
+                t.set_chrome_visible(True)
+            if zoom_changed:
+                self.set_zoom(old_zoom)
 
     # ---- painting ----
 
@@ -393,22 +608,25 @@ class DashboardCanvas(QWidget):
 
     def paintEvent(self, _e):
         p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
         theme = self.bus.theme if self.bus is not None else None
         # paint the canvas background ourselves (configurable via the theme's
         # "Canvas background" colour) so it never inherits the QGIS palette
         bg = QColor(theme.window_bg) if theme else QColor("#f4f6f8")
         p.fillRect(self.rect(), bg)
-        # snap grid as faint dots at every cell intersection (bolder while a
-        # tile is being dragged/resized)
-        dot = QColor(theme.grid_line) if theme else QColor("#c4ccd4")
-        dot.setAlpha(220 if self._guides else 130)
-        radius = 2.0 if self._guides else 1.4
-        p.setPen(Qt.NoPen)
-        p.setBrush(dot)
-        cw, ch = self.cell_size()
-        for c in range(0, self.cols + 1):
-            x = c * cw
-            for r in range(0, self.rows + 1):
-                p.drawEllipse(QPointF(x, r * ch), radius, radius)
+        # while a tile is being dragged/resized, hint the 8px snap with a faint
+        # dot lattice (coarsely spaced) — otherwise the canvas stays clean
+        if self._guides:
+            dot = QColor(theme.grid_line) if theme else QColor("#c4ccd4")
+            dot.setAlpha(150)
+            step = SNAP * 5 * (self._zoom or 1.0)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(dot)
+            x = 0.0
+            while x <= self.width():
+                y = 0.0
+                while y <= self.height():
+                    p.drawEllipse(QPointF(x, y), 1.4, 1.4)
+                    y += step
+                x += step
         p.end()

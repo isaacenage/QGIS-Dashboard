@@ -46,13 +46,44 @@ html, body {
   background: var(--brand-soft);
 }
 
-/* ---- page canvas (grid) ------------------------------------------------- */
-.dash-page {
+/* ---- page area: optional docked header banner around the scrolling grid - */
+.dash-page-area { flex: 1 1 auto; position: relative; overflow: hidden; }
+.dash-pagewrap { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.dash-scroll {
   flex: 1 1 auto;
   overflow: auto;
   background: var(--window-bg);
   padding: 10px;
+  min-width: 0;
+  min-height: 0;
 }
+
+/* docked brand banner (theme-driven surface + soft hairline, like a tile) */
+.dash-banner {
+  flex: 0 0 auto;
+  background: var(--surface-bg);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+.dash-banner-inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 14px;
+}
+.dash-banner-logo { object-fit: contain; flex: 0 0 auto; display: block; }
+.dash-banner-title {
+  color: var(--text);
+  font-family: var(--heading-family, var(--font-family));
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- page canvas (grid) ------------------------------------------------- */
 .dash-grid {
   position: relative;
   margin: 0 auto;

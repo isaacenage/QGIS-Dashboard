@@ -19,6 +19,8 @@ from .icons import monochrome_icon, logo_pixmap
 
 RADIUS_MIN = 0
 RADIUS_MAX = 32
+GAP_MIN = 0
+GAP_MAX = 48
 
 # Project description, rendered as rich text in the About panel.
 ABOUT_HTML = """
@@ -47,15 +49,20 @@ class SettingsDialog(QDialog):
     window owns the live-preview/revert logic, so we just delegate to it).
     *on_radius* is an optional callback ``f(int)`` applied live as the corner-
     radius slider moves (the change is global and kept — no revert).
-    (Export lives on the page tab strip, not here.)
+    *on_gap* is an optional callback ``f(int)`` applied live as the element-gap
+    slider moves; *gap* seeds that slider with the current value. (Export lives
+    on the page tab strip, not here.)
     """
 
-    def __init__(self, on_appearance, parent=None, on_radius=None):
+    def __init__(self, on_appearance, parent=None, on_radius=None,
+                 on_gap=None, gap=0):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.resize(640, 460)
         self._on_appearance = on_appearance
         self._on_radius = on_radius
+        self._on_gap = on_gap
+        self._gap = int(gap)
 
         border, muted = "#e2e6ec", "#55606d"
         accent, accent_hover, brand_soft = "#2b7de9", "#2569c6", "rgba(43,125,233,0.10)"
@@ -107,6 +114,8 @@ class SettingsDialog(QDialog):
         self._add_section("Appearance", "style_guide", self._appearance_page())
         self._add_section("Layout", "layout",
                           self._layout_page(radius, muted))
+        self._add_section("Spacing", "spacing",
+                          self._spacing_page(self._gap, muted))
         self._add_section("About", "info", self._about_page())
 
         self._nav.currentRowChanged.connect(self._stack.setCurrentIndex)
@@ -215,6 +224,39 @@ class SettingsDialog(QDialog):
         lay.addStretch(1)
         return page
 
+    def _spacing_page(self, gap, muted):
+        page, lay = self._page_shell("Spacing")
+
+        gap_hint = QLabel(
+            "Breathing room around every dashboard element. At 0 px cards can "
+            "sit edge to edge; slide right to inset each card so a consistent "
+            "gap always shows between elements — no matter how you arrange "
+            "them. Changes preview live on the dashboard behind this dialog.")
+        gap_hint.setWordWrap(True)
+        gap_hint.setStyleSheet("color:%s;" % muted)
+        lay.addWidget(gap_hint)
+
+        gap_row = QHBoxLayout()
+        gap_row.setSpacing(10)
+        gap_row.addWidget(QLabel("Element gap"))
+        self._gap_slider = QSlider(Qt.Orientation.Horizontal)
+        self._gap_slider.setRange(GAP_MIN, GAP_MAX)
+        self._gap_slider.setValue(max(GAP_MIN, min(GAP_MAX, int(gap))))
+        self._gap_slider.setSingleStep(1)
+        self._gap_slider.setPageStep(4)
+        gap_row.addWidget(self._gap_slider, 1)
+        self._gap_value = QLabel("%d px" % int(gap))
+        self._gap_value.setMinimumWidth(42)
+        self._gap_value.setAlignment(Qt.AlignmentFlag.AlignRight
+                                     | Qt.AlignmentFlag.AlignVCenter)
+        self._gap_value.setStyleSheet("color:%s;" % muted)
+        gap_row.addWidget(self._gap_value)
+        lay.addLayout(gap_row)
+        self._gap_slider.valueChanged.connect(self._on_gap_changed)
+
+        lay.addStretch(1)
+        return page
+
     def _about_page(self):
         page, lay = self._page_shell("About QGIS Dashboard")
 
@@ -241,3 +283,8 @@ class SettingsDialog(QDialog):
         self._radius_value.setText("%d px" % value)
         if callable(self._on_radius):
             self._on_radius(value)
+
+    def _on_gap_changed(self, value):
+        self._gap_value.setText("%d px" % value)
+        if callable(self._on_gap):
+            self._on_gap(value)

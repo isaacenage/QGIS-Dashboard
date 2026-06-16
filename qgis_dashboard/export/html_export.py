@@ -7,7 +7,9 @@ via :mod:`map_snapshot`, assembles the export model via :mod:`serialize`, and
 writes the inlined document via :mod:`html_builder`.
 """
 
-from qgis.core import QgsProject
+from qgis.core import (
+    QgsProject, QgsCoordinateReferenceSystem, QgsCoordinateTransform,
+)
 
 from .serialize import build_model
 from .theme_css import theme_to_css_vars
@@ -15,6 +17,8 @@ from .html_builder import build_html, load_assets
 from .data_collect import (
     collect_layer_data, base_pass_indices, image_data_uri, layer_size_info,
 )
+from .geometry_collect import collect_layer_geometry
+from .basemap import detect_basemap
 from .map_snapshot import canvas_data_uri
 
 
@@ -81,17 +85,52 @@ def _collect_layers(window, skip_layers):
         if lid in skip_layers:
             layers_model[lid] = {
                 "fields": [f.name() for f in layer.fields()],
-                "features": [], "skipped": True,
+                "features": [], "geometry": [], "skipped": True,
             }
             fid_indexes[lid] = {}
         else:
             data, fid_index = collect_layer_data(layer)
+            data["geometry"] = collect_layer_geometry(layer, project)
             layers_model[lid] = data
             fid_indexes[lid] = fid_index
     return layers_model, fid_indexes
 
 
-def _build_tile(tile, fid_indexes, skip_layers, map_uri):
+def _canvas_extent_4326(iface, project):
+    """The current map-canvas extent as ``[west, south, east, north]`` (WGS84)."""
+    if iface is None:
+        return None
+    canvas = iface.mapCanvas()
+    if canvas is None:
+        return None
+    try:
+        extent = canvas.extent()
+        src = canvas.mapSettings().destinationCrs()
+        dest = QgsCoordinateReferenceSystem("EPSG:4326")
+        if src.isValid() and src != dest:
+            transform = QgsCoordinateTransform(src, dest, project)
+            extent = transform.transformBoundingBox(extent)
+        return [extent.xMinimum(), extent.yMinimum(),
+                extent.xMaximum(), extent.yMaximum()]
+    except Exception:
+        return None
+
+
+def _build_map_block(window, layers_model):
+    """The interactive-map descriptor: basemap, extent, drawable layers, fallback."""
+    project = QgsProject.instance()
+    iface = getattr(window, "iface", None)
+    layer_ids = [lid for lid in sorted(referenced_layer_ids(window))
+                 if lid in layers_model]
+    return {
+        "basemap": detect_basemap(project),
+        "extent": _canvas_extent_4326(iface, project),
+        "layer_ids": layer_ids,
+        "fallback_image": canvas_data_uri(iface),
+    }
+
+
+def _build_tile(tile, fid_indexes, skip_layers, window, layers_model):
     element = tile.element
     gx, gy, gw, gh = tile.grid_rect()
     out = {
@@ -108,7 +147,7 @@ def _build_tile(tile, fid_indexes, skip_layers, map_uri):
                 element.layer(), element.config.get("base_filter"),
                 fid_indexes[lid])
     if element.type_name == "map":
-        out["map_image"] = map_uri
+        out["map"] = _build_map_block(window, layers_model)
     elif element.type_name == "image":
         out["image_uri"] = image_data_uri(element.config.get("path"))
     elif element.type_name == "header":
@@ -127,11 +166,10 @@ def export_dashboard(window, out_path, skip_layers=None):
     """Write the dashboard to *out_path* as a single HTML file. Returns the path."""
     skip_layers = set(skip_layers or [])
     layers_model, fid_indexes = _collect_layers(window, skip_layers)
-    map_uri = canvas_data_uri(getattr(window, "iface", None))
 
     pages = []
     for page in window.pages():
-        tiles = [_build_tile(t, fid_indexes, skip_layers, map_uri)
+        tiles = [_build_tile(t, fid_indexes, skip_layers, window, layers_model)
                  for t in page.canvas.tiles()]
         pages.append({
             "id": page.id,
@@ -149,8 +187,9 @@ def export_dashboard(window, out_path, skip_layers=None):
         gap=window.canvas_gap())
 
     css_vars = theme_to_css_vars(model["theme"])
-    runtime_css, runtime_js = load_assets()
+    runtime_css, runtime_js, leaflet_css, leaflet_js = load_assets()
     html = build_html(model, css_vars, runtime_css, runtime_js,
+                      leaflet_css=leaflet_css, leaflet_js=leaflet_js,
                       title=_project_title())
 
     with open(out_path, "w", encoding="utf-8") as fh:

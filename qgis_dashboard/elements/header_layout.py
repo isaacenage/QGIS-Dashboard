@@ -104,6 +104,54 @@ def header_tile_placement(anchor, thickness, region_w, region_h):
             (region_w + thickness, region_h))
 
 
+# config keys that belonged to the docked-banner model and do not survive onto
+# a free-placed header tile
+_DOCK_ONLY_KEYS = ("anchor", "thickness", "scope_all_pages", "id", "grid",
+                   "__type__")
+
+
+def materialize_header_tiles(pages, global_header, region_w, region_h):
+    """Fold legacy headers into each page's tile list (pure migration).
+
+    For every page, the resolved header (per-page over *global_header*) is
+    appended to that page's ``elements`` as a ``header`` tile, existing tiles
+    are shifted out of the band, and the dock-only config keys are dropped. The
+    region grows to include the band; the returned size is the max across pages
+    so the single global page size stays uniform.
+
+    Returns ``(new_pages, new_region_w, new_region_h)``. Input is not mutated.
+    """
+    new_pages = []
+    grown_w, grown_h = region_w, region_h
+    for page in pages:
+        resolved = resolve_header(page.get("header"), global_header)
+        new_page = dict(page)
+        new_page.pop("header", None)
+        elements = [dict(e) for e in page.get("elements", [])]
+        if resolved:
+            anchor = resolved.get("anchor", "top")
+            thickness = int(resolved.get("thickness", 80) or 80)
+            rect, (dx, dy), (pw, ph) = header_tile_placement(
+                anchor, thickness, region_w, region_h)
+            if dx or dy:
+                for el in elements:
+                    g = el.get("grid")
+                    if isinstance(g, dict) and all(
+                            k in g for k in ("x", "y", "w", "h")):
+                        el["grid"] = {"x": g["x"] + dx, "y": g["y"] + dy,
+                                      "w": g["w"], "h": g["h"]}
+            hdr = {k: v for k, v in resolved.items()
+                   if k not in _DOCK_ONLY_KEYS}
+            hdr["__type__"] = "header"
+            hdr["grid"] = {"x": rect[0], "y": rect[1],
+                           "w": rect[2], "h": rect[3]}
+            elements.append(hdr)
+            grown_w, grown_h = max(grown_w, pw), max(grown_h, ph)
+        new_page["elements"] = elements
+        new_pages.append(new_page)
+    return new_pages, grown_w, grown_h
+
+
 def resolve_header(page_header, global_header):
     """Pick the header config to render for one page.
 

@@ -20,7 +20,8 @@ import unittest
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "elements"))
 
-from header_layout import banner_compose, box_direction, header_tile_placement
+from header_layout import (banner_compose, box_direction,
+                           header_tile_placement, materialize_header_tiles)
 
 
 class BannerComposeTest(unittest.TestCase):
@@ -95,6 +96,66 @@ class HeaderTilePlacementTest(unittest.TestCase):
     def test_unknown_anchor_falls_back_to_top(self):
         self.assertEqual(header_tile_placement("sideways", 50, 200, 100),
                          header_tile_placement("top", 50, 200, 100))
+
+
+class MaterializeHeaderTilesTest(unittest.TestCase):
+    """Legacy global/per-page headers become header tiles in each page."""
+
+    def _page(self, header=None, elements=None):
+        p = {"id": "p1", "title": "Page 1", "connections": {},
+             "elements": elements if elements is not None else []}
+        if header is not None:
+            p["header"] = header
+        return p
+
+    def test_global_header_added_to_each_page_as_top_tile(self):
+        pages = [self._page(elements=[{"__type__": "indicator",
+                                       "grid": {"x": 0, "y": 0, "w": 200, "h": 150}}])]
+        glob = {"title": "Brand", "anchor": "top", "thickness": 80,
+                "font_size": 22, "logo_slot": "left"}
+        new_pages, w, h = materialize_header_tiles(pages, glob, 1000, 600)
+        els = new_pages[0]["elements"]
+        # existing tile shifted down by the band thickness
+        self.assertEqual(els[0]["grid"], {"x": 0, "y": 80, "w": 200, "h": 150})
+        # header appended as a header tile spanning the band
+        hdr = els[1]
+        self.assertEqual(hdr["__type__"], "header")
+        self.assertEqual(hdr["grid"], {"x": 0, "y": 0, "w": 1000, "h": 80})
+        self.assertEqual(hdr["title"], "Brand")
+        # dock-only keys are stripped from the tile config
+        self.assertNotIn("anchor", hdr)
+        self.assertNotIn("thickness", hdr)
+        self.assertNotIn("scope_all_pages", hdr)
+        # region grew in height; the original 'header' key is gone
+        self.assertEqual((w, h), (1000, 680))
+        self.assertNotIn("header", new_pages[0])
+
+    def test_per_page_header_overrides_global(self):
+        pages = [self._page(header={"title": "Local", "anchor": "top",
+                                    "thickness": 50})]
+        glob = {"title": "Global", "anchor": "top", "thickness": 80}
+        new_pages, w, h = materialize_header_tiles(pages, glob, 1000, 600)
+        hdr = new_pages[0]["elements"][-1]
+        self.assertEqual(hdr["title"], "Local")
+        self.assertEqual(hdr["grid"]["h"], 50)
+        self.assertEqual((w, h), (1000, 650))
+
+    def test_no_header_leaves_page_unchanged(self):
+        pages = [self._page(elements=[{"__type__": "chart",
+                                       "grid": {"x": 0, "y": 0, "w": 100, "h": 100}}])]
+        new_pages, w, h = materialize_header_tiles(pages, None, 1000, 600)
+        self.assertEqual(new_pages[0]["elements"],
+                         [{"__type__": "chart",
+                           "grid": {"x": 0, "y": 0, "w": 100, "h": 100}}])
+        self.assertEqual((w, h), (1000, 600))
+
+    def test_region_is_uniform_max_across_pages(self):
+        # page A has a top header (grows height), page B has none
+        page_a = {"id": "a", "title": "A", "connections": {}, "elements": [],
+                  "header": {"title": "H", "anchor": "top", "thickness": 80}}
+        page_b = {"id": "b", "title": "B", "connections": {}, "elements": []}
+        new_pages, w, h = materialize_header_tiles([page_a, page_b], None, 1000, 600)
+        self.assertEqual((w, h), (1000, 680))   # both pages share the grown region
 
 
 if __name__ == "__main__":

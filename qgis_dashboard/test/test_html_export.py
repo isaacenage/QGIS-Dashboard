@@ -50,10 +50,10 @@ class BuildTileTest(unittest.TestCase):
 
     def test_optional_keys_passthrough(self):
         tile = {"id": "m", "type": "map", "grid": {},
-                "map_image": "data:image/png;base64,AAAA",
+                "map": {"extent": [0, 1, 2, 3]},
                 "layer_id": "L1", "base_pass": [0, 2]}
         out = build_tile(tile)
-        self.assertEqual(out["map_image"], "data:image/png;base64,AAAA")
+        self.assertEqual(out["map"], {"extent": [0, 1, 2, 3]})
         self.assertEqual(out["layer_id"], "L1")
         self.assertEqual(out["base_pass"], [0, 2])
 
@@ -217,6 +217,32 @@ class XyzTemplateTest(unittest.TestCase):
     def test_osm_fallback_constant_is_valid(self):
         self.assertIn("{z}", OSM_BASEMAP["url_template"])
         self.assertEqual(OSM_BASEMAP["tms"], False)
+
+
+class MapBlockTest(unittest.TestCase):
+    def test_map_block_passthrough(self):
+        tile = {"id": "m", "type": "map", "grid": {},
+                "map": {"basemap": {"url_template": "u"},
+                        "extent": [0, 1, 2, 3], "layer_ids": ["L1"]}}
+        out = build_tile(tile)
+        self.assertEqual(out["map"]["extent"], [0, 1, 2, 3])
+        self.assertEqual(out["map"]["layer_ids"], ["L1"])
+
+    def test_map_image_no_longer_passed_through(self):
+        tile = {"id": "m", "type": "map", "grid": {},
+                "map_image": "data:image/png;base64,AAAA"}
+        out = build_tile(tile)
+        self.assertNotIn("map_image", out)
+
+    def test_version_is_two(self):
+        self.assertEqual(EXPORT_VERSION, 2)
+
+    def test_layers_geometry_carried_through(self):
+        model = build_model((12, 8), {}, "p1",
+                            [{"id": "p1", "title": "P", "connections": {},
+                              "tiles": []}],
+                            {"L1": {"fields": [], "features": [], "geometry": []}})
+        self.assertIn("geometry", model["layers"]["L1"])
 
 
 if __name__ == "__main__":

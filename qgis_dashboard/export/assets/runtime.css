@@ -46,7 +46,7 @@ html, body {
   background: var(--brand-soft);
 }
 
-/* ---- page area: optional docked header banner around the scrolling grid - */
+/* ---- page area: a scrolling grid of tiles ------------------------------- */
 .dash-page-area { flex: 1 1 auto; position: relative; overflow: hidden; }
 .dash-pagewrap { position: absolute; inset: 0; display: flex; flex-direction: column; }
 .dash-scroll {
@@ -58,15 +58,7 @@ html, body {
   min-height: 0;
 }
 
-/* docked brand banner (theme-driven surface + soft hairline, like a tile) */
-.dash-banner {
-  flex: 0 0 auto;
-  background: var(--surface-bg);
-  border: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  overflow: hidden;
-}
+/* header tile content: logo + title (used by the header tile renderer) */
 .dash-banner-inner {
   display: flex;
   align-items: center;

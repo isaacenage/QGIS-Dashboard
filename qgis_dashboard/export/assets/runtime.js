@@ -643,7 +643,7 @@
     node.style.width = Math.max(Number(g.w || 120) - 2 * GAP, 1) + "px";
     node.style.height = Math.max(Number(g.h || 120) - 2 * GAP, 1) + "px";
 
-    var showTitle = !FULL_BLEED[tile.type] && tile.type !== "text";
+    var showTitle = !FULL_BLEED[tile.type] && tile.type !== "text" && tile.type !== "header";
     if (showTitle) {
       var title = tile.config.title || ELEMENT_LABELS[tile.type] || tile.type;
       node.appendChild(el("div", "dash-tile-title", title));
@@ -656,6 +656,7 @@
     else if (tile.type === "pivot") renderPivot(body, tile, page);
     else if (tile.type === "category_selector") renderSelector(body, tile, page);
     else if (tile.type === "text") renderText(body, tile);
+    else if (tile.type === "header") renderHeader(body, tile);
     else if (tile.type === "image") renderImage(body, tile);
     else if (tile.type === "map") renderMap(body, tile);
     else if (tile.type === "chart") {
@@ -668,49 +669,36 @@
     return node;
   }
 
-  // ---- header (brand banner) -------------------------------------------
+  // ---- header (brand banner) tile --------------------------------------
   // Mirrors theme fallbacks so a chosen family degrades gracefully.
   var FONT_FALLBACK = '"Segoe UI", "Helvetica Neue", Arial, sans-serif';
 
-  // anchor -> { css: flex-direction, bannerFirst } (mirror header_layout.box_direction)
-  function bannerDir(anchor) {
-    if (anchor === "bottom") return { css: "column", bannerFirst: false };
-    if (anchor === "left") return { css: "row", bannerFirst: true };
-    if (anchor === "right") return { css: "row", bannerFirst: false };
-    return { css: "column", bannerFirst: true };   // top (default)
-  }
-
-  function buildBanner(hdr) {
-    var banner = el("div", "dash-banner");
-    var vertical = (hdr.anchor === "top" || hdr.anchor === "bottom" || !hdr.anchor);
-    var thickness = Number(hdr.thickness || 80);
-    if (vertical) banner.style.height = thickness + "px";
-    else banner.style.width = thickness + "px";
-
+  function renderHeader(body, tile) {
+    var cfg = tile.config || {};
     var inner = el("div", "dash-banner-inner");
-    var slot = hdr.logo_slot || "left";
+    var slot = cfg.logo_slot || "left";
     inner.style.flexDirection = (slot === "above" || slot === "below") ? "column" : "row";
+    inner.style.height = "100%";
     var logoFirst = (slot === "left" || slot === "above");
 
     var logo = null;
-    if (hdr.logo_uri) {
+    if (tile.logo_uri) {
       logo = el("img", "dash-banner-logo");
-      logo.src = hdr.logo_uri;
-      var sz = Number(hdr.logo_size || 40);
+      logo.src = tile.logo_uri;
+      var sz = Number(cfg.logo_size || 40);
       logo.style.width = sz + "px";
       logo.style.height = sz + "px";
     }
-    var title = el("div", "dash-banner-title", hdr.title || "");
-    if (hdr.font_family) title.style.fontFamily = '"' + hdr.font_family + '", ' + FONT_FALLBACK;
-    title.style.fontSize = Number(hdr.font_size || 22) + "px";
-    title.style.textAlign = hdr.align || "left";
+    var title = el("div", "dash-banner-title", cfg.title || "");
+    if (cfg.font_family) title.style.fontFamily = '"' + cfg.font_family + '", ' + FONT_FALLBACK;
+    title.style.fontSize = Number(cfg.font_size || 22) + "px";
+    title.style.textAlign = cfg.align || "left";
     title.style.flex = "1 1 auto";
 
     if (logo && logoFirst) inner.appendChild(logo);
     inner.appendChild(title);
     if (logo && !logoFirst) inner.appendChild(logo);
-    banner.appendChild(inner);
-    return banner;
+    body.appendChild(inner);
   }
 
   function buildGrid(page) {
@@ -733,14 +721,9 @@
     var area = document.getElementById("page-area");
     area.innerHTML = "";
     var wrap = el("div", "dash-pagewrap");
-    var hdr = page.header;
-    var dir = hdr ? bannerDir(hdr.anchor) : null;
-    if (dir) wrap.style.flexDirection = dir.css;
     var scroll = el("div", "dash-scroll");
     scroll.appendChild(buildGrid(page));
-    if (hdr && dir.bannerFirst) wrap.appendChild(buildBanner(hdr));
     wrap.appendChild(scroll);
-    if (hdr && !dir.bannerFirst) wrap.appendChild(buildBanner(hdr));
     area.appendChild(wrap);
     // charts need their host measured after layout
     requestAnimationFrame(function () {

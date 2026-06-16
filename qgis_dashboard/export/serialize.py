@@ -32,7 +32,7 @@ EXPORT_VERSION = 1
 # Optional per-tile keys copied through verbatim when present (and not None).
 _OPTIONAL_TILE_KEYS = (
     "layer_id", "base_pass", "map_image", "image_uri", "indicator_value",
-    "icon_uri",
+    "icon_uri", "logo_uri",
 )
 
 
@@ -68,18 +68,15 @@ def build_tile(tile):
 def build_page(page):
     """Normalize one page (id/title/connections + its tiles).
 
-    A resolved ``header`` dict (the docked brand banner, with its logo already
-    embedded as ``logo_uri``) is carried through verbatim when present.
+    The header is an ordinary tile now, so it flows through ``build_tile`` like
+    any element — there is no separate docked-banner key.
     """
-    out = {
+    return {
         "id": page["id"],
         "title": page.get("title") or "Page",
         "connections": page.get("connections") or {},
         "tiles": [build_tile(t) for t in page.get("tiles", [])],
     }
-    if page.get("header"):
-        out["header"] = page["header"]
-    return out
 
 
 def build_model(grid, theme, active_page, pages, layers, gap=0):

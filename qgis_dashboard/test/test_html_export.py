@@ -72,16 +72,22 @@ class BuildTileTest(unittest.TestCase):
         self.assertEqual(out["config"]["value_size"], 48)
 
 
-class BuildPageHeaderTest(unittest.TestCase):
-    def test_header_passes_through_when_present(self):
-        page = {"id": "p1", "title": "P", "connections": {}, "tiles": [],
-                "header": {"title": "Brand", "anchor": "top",
-                           "logo_uri": "data:image/png;base64,AA"}}
+class HeaderTileTest(unittest.TestCase):
+    def test_header_is_a_normal_tile_with_logo_uri(self):
+        # the header is a positioned tile now — no separate docked-banner key
+        page = {"id": "p1", "title": "P", "connections": {},
+                "tiles": [{"id": "h", "type": "header",
+                           "grid": {"x": 0, "y": 0, "w": 1000, "h": 80},
+                           "logo_uri": "data:image/png;base64,AA",
+                           "config": {"title": "Brand", "logo_slot": "left"}}]}
         out = build_page(page)
-        self.assertEqual(out["header"]["title"], "Brand")
-        self.assertEqual(out["header"]["logo_uri"], "data:image/png;base64,AA")
+        self.assertNotIn("header", out)
+        hdr = out["tiles"][0]
+        self.assertEqual(hdr["type"], "header")
+        self.assertEqual(hdr["logo_uri"], "data:image/png;base64,AA")
+        self.assertEqual(hdr["config"]["title"], "Brand")
 
-    def test_no_header_key_when_absent(self):
+    def test_no_header_key_on_a_plain_page(self):
         out = build_page({"id": "p1", "title": "P", "connections": {},
                           "tiles": []})
         self.assertNotIn("header", out)

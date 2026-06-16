@@ -24,7 +24,7 @@ from qgis.PyQt.QtWidgets import (
     QTabBar, QStackedWidget, QVBoxLayout, QMessageBox, QInputDialog, QMenu,
     QFileDialog,
 )
-from qgis.PyQt.QtCore import Qt, QSize, pyqtSignal
+from qgis.PyQt.QtCore import Qt, QSize, QEvent, QTimer, pyqtSignal
 from qgis.core import QgsProject
 
 from .bus import DashboardBus
@@ -35,6 +35,7 @@ from .start_view import StartView
 from .fonts import ensure_fonts_registered
 from .icons import logo_icon, monochrome_icon
 from .sidebar import Sidebar
+from .minimized_bubble import MinimizedBubble
 from .dashboard_canvas import DashboardCanvas
 from .page_view import PageView
 from .elements import create_element
@@ -132,6 +133,10 @@ class DashboardWindow(QMainWindow):
         self.resize(1100, 720)
 
         self.bus = DashboardBus(iface, Theme.default(), self)
+
+        # floating puck shown while minimized (replaces Qt's parented-window
+        # minimize stub that pins itself over the QGIS status bar)
+        self._bubble = None
 
         # tab bar + stack of pages
         self._pages = []
@@ -722,10 +727,57 @@ class DashboardWindow(QMainWindow):
 
     # ---- lifecycle ----
 
+    def _ensure_bubble(self):
+        if self._bubble is None:
+            # parent to the QGIS main window, NOT to self: a child top-level
+            # window hides when its parent hides, but the puck must stay visible
+            # precisely while the dashboard window is hidden.
+            self._bubble = MinimizedBubble(self.iface.mainWindow())
+            self._bubble.restoreRequested.connect(self.restore_from_bubble)
+        return self._bubble
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange:
+            if self.windowState() & Qt.WindowState.WindowMinimized:
+                # Defer past the state-change machinery, then swap the window
+                # for the floating puck.
+                QTimer.singleShot(0, self._collapse_to_bubble)
+
+    def _collapse_to_bubble(self):
+        # Clear the minimized bit so a later plain show()/restore is clean.
+        self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMinimized)
+        self.hide()
+        self._ensure_bubble().show_at_corner()
+
+    def restore_from_bubble(self):
+        if self._bubble is not None:
+            self._bubble.hide()
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def hide_all(self):
+        """Hide the window and the floating puck (toolbar toggled off)."""
+        if self._bubble is not None:
+            self._bubble.hide()
+        self.hide()
+
+    def hideEvent(self, event):
+        # Whenever the window is hidden (toolbar toggle, close), drop the puck.
+        # During _collapse_to_bubble the puck is (re)shown *after* this hide(),
+        # so the two don't fight.
+        if self._bubble is not None:
+            self._bubble.hide()
+        super().hideEvent(event)
+
     def closeEvent(self, event):
         # Hide rather than destroy so state survives a reopen; tell the plugin
         # so it can untick the toolbar action.
         self.closed.emit()
+        if self._bubble is not None:
+            self._bubble.deleteLater()
+            self._bubble = None
         super().closeEvent(event)
 
     def clear_all(self):

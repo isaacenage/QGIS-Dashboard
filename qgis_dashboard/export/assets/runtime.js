@@ -241,6 +241,10 @@
     return n;
   }
   function color(i) { return SERIES[i % SERIES.length]; }
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
 
   // ---- SVG chart painters ----------------------------------------------
   function drawChart(host, tile, page) {
@@ -617,15 +621,101 @@
     body.appendChild(wrap);
   }
 
+  // ---- interactive Leaflet map ----------------------------------------
+  var MAP_HOSTS = [];      // {host, tile} for the post-layout init pass
+  var MAP_INSTANCES = [];  // live L.map objects, torn down on page switch
+
   function renderMap(body, tile) {
     var wrap = el("div", "dash-map-wrap");
-    if (tile.map_image) {
-      var img = el("img", "dash-map"); img.src = tile.map_image;
+    body.appendChild(wrap);
+    if (tile.map && typeof L !== "undefined") {
+      MAP_HOSTS.push({ host: wrap, tile: tile });
+    } else if (tile.map && tile.map.fallback_image) {
+      var img = el("img", "dash-map"); img.src = tile.map.fallback_image;
       wrap.appendChild(img);
     } else {
       wrap.appendChild(el("div", "dash-note", "Map — view in QGIS"));
     }
-    body.appendChild(wrap);
+  }
+
+  function featureCollection(layer) {
+    var rows = layer.features || [];
+    var geoms = layer.geometry || [];
+    var feats = [];
+    for (var i = 0; i < rows.length; i++) {
+      if (!geoms[i]) continue;
+      feats.push({ type: "Feature", geometry: geoms[i], properties: rows[i] });
+    }
+    return { type: "FeatureCollection", features: feats };
+  }
+
+  function identifyHtml(fields, props) {
+    props = props || {};
+    var names = (fields && fields.length) ? fields : Object.keys(props);
+    var rows = names.map(function (name) {
+      var v = props[name];
+      if (v === null || v === undefined) v = "";
+      return "<tr><th>" + escapeHtml(name) + "</th><td>" +
+             escapeHtml(v) + "</td></tr>";
+    }).join("");
+    return '<div class="dash-identify"><table>' + rows + "</table></div>";
+  }
+
+  function initMap(host, tile) {
+    var m = tile.map || {};
+    var map;
+    try {
+      map = L.map(host);
+    } catch (e) {
+      if (m.fallback_image) {
+        var img = el("img", "dash-map"); img.src = m.fallback_image;
+        host.appendChild(img);
+      }
+      return;
+    }
+    var bm = m.basemap || {};
+    var opts = { maxZoom: bm.max_zoom || 19 };
+    if (bm.attribution) opts.attribution = bm.attribution;
+    if (bm.subdomains) opts.subdomains = bm.subdomains;
+    if (bm.tms) opts.tms = true;
+    L.tileLayer(bm.url_template ||
+      "https://tile.openstreetmap.org/{z}/{x}/{y}.png", opts).addTo(map);
+
+    var bounds = null;
+    (m.layer_ids || []).forEach(function (lid, idx) {
+      var layer = DATA.layers[lid];
+      if (!layer || !layer.geometry) return;
+      var fc = featureCollection(layer);
+      if (!fc.features.length) return;
+      var col = color(idx);
+      var gj = L.geoJSON(fc, {
+        style: function () {
+          return { color: col, weight: 2, fillColor: col, fillOpacity: 0.25 };
+        },
+        pointToLayer: function (f, latlng) {
+          return L.circleMarker(latlng, { radius: 5, color: col,
+            fillColor: col, fillOpacity: 0.85, weight: 1 });
+        },
+        onEachFeature: function (f, lyr) {
+          lyr.bindPopup(identifyHtml(layer.fields, f.properties));
+        }
+      }).addTo(map);
+      try {
+        var b = gj.getBounds();
+        if (b.isValid()) bounds = bounds ? bounds.extend(b) : b;
+      } catch (e) {}
+    });
+
+    var ext = m.extent;
+    if (ext && ext.length === 4) {
+      map.fitBounds([[ext[1], ext[0]], [ext[3], ext[2]]]);
+    } else if (bounds) {
+      map.fitBounds(bounds);
+    } else {
+      map.setView([0, 0], 2);
+    }
+    map.invalidateSize();
+    MAP_INSTANCES.push(map);
   }
 
   // ---- tile + page assembly --------------------------------------------
@@ -718,6 +808,9 @@
 
   function renderPage(page) {
     CHART_HOSTS = [];
+    MAP_INSTANCES.forEach(function (mp) { try { mp.remove(); } catch (e) {} });
+    MAP_INSTANCES = [];
+    MAP_HOSTS = [];
     var area = document.getElementById("page-area");
     area.innerHTML = "";
     var wrap = el("div", "dash-pagewrap");
@@ -725,9 +818,10 @@
     scroll.appendChild(buildGrid(page));
     wrap.appendChild(scroll);
     area.appendChild(wrap);
-    // charts need their host measured after layout
+    // charts and maps need their host measured after layout
     requestAnimationFrame(function () {
       CHART_HOSTS.forEach(function (c) { drawChart(c.host, c.tile, c.page); });
+      MAP_HOSTS.forEach(function (h) { initMap(h.host, h.tile); });
     });
   }
 
@@ -768,6 +862,9 @@
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(function () {
       CHART_HOSTS.forEach(function (c) { drawChart(c.host, c.tile, c.page); });
+      MAP_INSTANCES.forEach(function (mp) {
+        try { mp.invalidateSize(); } catch (e) {}
+      });
     }, 150);
   });
 

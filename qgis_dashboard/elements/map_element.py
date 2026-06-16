@@ -166,6 +166,8 @@ class MapElement(DashboardElement):
     accepts_filter = False    # never subsets its *displayed* layers
     is_filter_source = True   # the visible extent drives connected tiles
     full_bleed = True   # the canvas fills the tile: no title/description, no padding
+    handles_own_body_drag = True   # _TileMapCanvas drives the Build-mode move,
+                        # so keep the thin top drag strip (no full-tile overlay)
 
     def __init__(self, bus, config=None, parent=None):
         super().__init__(bus, config, parent)

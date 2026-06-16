@@ -68,11 +68,22 @@ def _proposed_resize(edge, start_geom, dx, dy, min_px=40):
     return (x, y, w, h)
 
 
-class _DragHandle(QWidget):
-    """Transparent overlay across the top of a tile; press-drag moves it.
+DRAG_THRESHOLD = 3   # px the pointer must travel before a press becomes a move
 
-    Sits on top of the element's own title area so the card stays clean — the
-    handle is invisible, only the move cursor reveals it.
+
+class _DragHandle(QWidget):
+    """Transparent overlay that moves the host tile when dragged.
+
+    In Build mode it covers the **whole tile** so a drag anywhere on the card
+    moves it — the contents are inert in Build mode, so there is nothing to grab
+    underneath. (The map drives its own body drag, so its handle stays a thin top
+    strip; see ``GridTile.resizeEvent``.) The handle is invisible; only the move
+    cursor reveals it, and it is hidden in Use mode so contents become interactive.
+
+    A press only becomes a move once the pointer travels past ``DRAG_THRESHOLD``,
+    so a plain click or a double-click never nudges the tile — that keeps
+    double-click-to-edit (text tiles) working, forwarded via
+    :meth:`mouseDoubleClickEvent`.
     """
 
     def __init__(self, tile):
@@ -81,20 +92,36 @@ class _DragHandle(QWidget):
         self.setCursor(Qt.CursorShape.SizeAllCursor)
         self.setToolTip("Drag to move")
         self._origin = None
+        self._moving = False
 
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
             self._origin = e.globalPos()
-            self._tile.begin_move()
+            self._moving = False
+        else:
+            super().mousePressEvent(e)
 
     def mouseMoveEvent(self, e):
-        if self._origin is not None:
-            self._tile.move_by(e.globalPos() - self._origin)
+        if self._origin is None:
+            return
+        delta = e.globalPos() - self._origin
+        if not self._moving:
+            if abs(delta.x()) + abs(delta.y()) < DRAG_THRESHOLD:
+                return
+            self._moving = True
+            self._tile.begin_move()
+        self._tile.move_by(delta)
 
     def mouseReleaseEvent(self, e):
-        if self._origin is not None:
-            self._origin = None
+        if self._moving:
             self._tile.end_move()
+        self._origin = None
+        self._moving = False
+
+    def mouseDoubleClickEvent(self, e):
+        # the overlay covers the whole tile in Build mode, so route a body
+        # double-click to the element (text tiles edit on double-click)
+        self._tile.element.on_tile_double_click()
 
 
 EDGE_CURSORS = {
@@ -269,8 +296,15 @@ class GridTile(QFrame):
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
-        # drag strip spans the top, leaving room for the two corner buttons
-        self.header.setGeometry(6, 2, max(self.width() - 52, 1), HEADER_H)
+        # Build-mode drag overlay: it covers the whole tile so a drag anywhere on
+        # the (inert) card body moves it. The map drives its own body drag, so its
+        # handle stays a thin top strip leaving room for the two corner buttons.
+        # The resize handles + ⚙/✕ buttons are raised above it (below) so they
+        # stay grabbable through the overlay.
+        if getattr(self.element, "handles_own_body_drag", False):
+            self.header.setGeometry(6, 2, max(self.width() - 52, 1), HEADER_H)
+        else:
+            self.header.setGeometry(0, 0, self.width(), self.height())
         self.close_btn.move(self.width() - 24, 3)
         self.style_btn.move(self.width() - 46, 3)
         self._place_handles()

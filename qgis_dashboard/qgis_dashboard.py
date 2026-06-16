@@ -139,10 +139,12 @@ class qgisdashboard:
 
     def toggle(self, checked):
         win = self._ensure_window()
-        win.setVisible(checked)
         if checked:
-            win.raise_()
-            win.activateWindow()
+            # restore_from_bubble shows the window (clearing any minimized puck),
+            # raises and activates it.
+            win.restore_from_bubble()
+        else:
+            win.hide_all()
 
     # ---- project save/load hooks ----
 

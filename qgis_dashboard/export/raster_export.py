@@ -4,8 +4,9 @@
 Unlike the interactive HTML export (which reproduces live cross-filtering in a
 browser), these write a *snapshot* of the dashboard as it is currently laid
 out, mirroring the Summarizer plugin's approach: grab the canvas into a
-high-resolution pixmap (``DashboardCanvas.export_pixmap``) and either save it
-straight to PNG or lay it onto an A4 page via :class:`QPdfWriter`.
+high-resolution pixmap (``PageView.export_pixmap`` — the canvas *plus* its
+docked header banner) and either save it straight to PNG or lay it onto an A4
+page via :class:`QPdfWriter`.
 
 When the dashboard has more than one (non-empty) page the user is first asked
 — via :class:`ExportScopeDialog` — whether to export **all pages** or **one
@@ -155,7 +156,7 @@ def export_png(window, parent=None):
         if not path:
             return
         path = _ensure_ext(path, "png")
-        pixmap = page.canvas.export_pixmap(scale=EXPORT_SCALE)
+        pixmap = page.view.export_pixmap(scale=EXPORT_SCALE)
         if pixmap.isNull() or not pixmap.save(path, "PNG"):
             QMessageBox.critical(
                 parent, "Export to PNG", "Could not write the PNG file.")
@@ -179,7 +180,7 @@ def export_png(window, parent=None):
             n += 1
         used.add(candidate)
         path = os.path.join(directory, candidate + ".png")
-        pixmap = page.canvas.export_pixmap(scale=EXPORT_SCALE)
+        pixmap = page.view.export_pixmap(scale=EXPORT_SCALE)
         if pixmap.isNull() or not pixmap.save(path, "PNG"):
             QMessageBox.critical(
                 parent, "Export to PNG",
@@ -196,7 +197,7 @@ def export_png(window, parent=None):
 
 def _write_pdf(pages, path):
     """Render *pages* to *path* as a multi-page PDF (one A4 page each)."""
-    pixmaps = [p.canvas.export_pixmap(scale=EXPORT_SCALE) for p in pages]
+    pixmaps = [p.view.export_pixmap(scale=EXPORT_SCALE) for p in pages]
     pixmaps = [pm for pm in pixmaps if not pm.isNull()]
     if not pixmaps:
         return False

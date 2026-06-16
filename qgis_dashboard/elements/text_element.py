@@ -73,11 +73,12 @@ class TextElement(DashboardElement):
 
     # ---- in-place editing ----
 
-    def mouseDoubleClickEvent(self, event):
+    def on_tile_double_click(self):
         # Editing the text is a Build-mode action: in Use mode (locked) the tile
-        # is fixed, so a double-click does nothing.
+        # is fixed, so a double-click does nothing. Routed here both from the
+        # Build-mode drag overlay (which covers the whole tile) and from a direct
+        # double-click on the tile.
         if self._interactive:
-            super().mouseDoubleClickEvent(event)
             return
         current = self.config.get("text", "")
         text, ok = QInputDialog.getMultiLineText(
@@ -86,4 +87,7 @@ class TextElement(DashboardElement):
             self.config["text"] = text
             self.refresh()
             QgsProject.instance().setDirty(True)   # capture the edit on next save
+
+    def mouseDoubleClickEvent(self, event):
+        self.on_tile_double_click()
         super().mouseDoubleClickEvent(event)

@@ -10,25 +10,35 @@ shows a scrollable wall of cards —
 * one **recent card** per recently saved/opened ``.qdash`` file (branded logo
   preview, name, elided path, last-modified date).
 
-Everything is themed through :class:`~theme.Theme` (soft ``theme.border``
-hairlines only — no dark outlines, per the codebase rule) and restyled on
-``themeChanged`` via :meth:`StartView.apply_theme`.
+The Start screen is **plugin chrome**, not a canvas tile, so — like the rail,
+tabs and dialogs — it is deliberately **locked to the fixed neutral look**
+(:data:`theme.CHROME` palette + :data:`theme.SYSTEM_FONT_STACK`) and is *not*
+affected by the dashboard theme/preset chosen in Settings. ``apply_theme`` is
+kept (the window calls it on ``themeChanged``) but ignores the passed theme's
+colors. Soft ``CHROME["border"]`` hairlines only — no dark outlines, per the
+codebase rule.
 """
 
 import os
 
-from qgis.PyQt.QtCore import Qt, pyqtSignal, QDateTime, QSize
+from qgis.PyQt.QtCore import Qt, pyqtSignal, QDateTime
 from qgis.PyQt.QtWidgets import (
     QFrame, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout, QWidget,
     QScrollArea, QSizePolicy, QGraphicsDropShadowEffect,
 )
 from qgis.PyQt.QtGui import QColor
 
-from .icons import monochrome_icon, logo_pixmap
+from .icons import icon_pixmap, logo_pixmap
+from .theme import CHROME
 
 CARD_W = 224
 CARD_H = 208
 CARD_GAP = 16
+
+# Container-less action "card": a large glyph + a caption, no frame/chip.
+ACTION_W = 168
+ACTION_H = 148
+ACTION_ICON = 72
 
 
 class _BaseCard(QFrame):
@@ -57,61 +67,62 @@ class _BaseCard(QFrame):
         super().mouseReleaseEvent(event)
 
     def _card_qss(self, object_name):
-        t = self._theme
         return (
             "QFrame#%(n)s { background:%(bg)s; border:1px solid %(border)s;"
             " border-radius:%(r)dpx; }"
             "QFrame#%(n)s:hover { background:%(soft)s; border-color:%(accent)s; }"
-            % {"n": object_name, "bg": t.surface_bg, "border": t.border,
-               "r": int(t.radius), "soft": t._brand_soft(), "accent": t.accent}
+            % {"n": object_name, "bg": CHROME["surface"], "border": CHROME["border"],
+               "r": 12, "soft": CHROME["brand_soft"], "accent": CHROME["accent"]}
         )
 
 
 class _ActionCard(_BaseCard):
-    """A large call-to-action card: tinted glyph + title + subtitle."""
+    """A container-less call-to-action: one large glyph + a caption.
 
-    def __init__(self, theme, icon_key, title, subtitle, parent=None):
+    No frame, chip or shadow — just the icon and its label, with a soft rounded
+    hover wash for click affordance. Theme-independent (fixed CHROME look).
+    """
+
+    def __init__(self, theme, icon_key, title, parent=None):
         super().__init__(theme, parent)
         self.setObjectName("startActionCard")
         self._icon_key = icon_key
+        self.setGraphicsEffect(None)          # drop the inherited card shadow
+        self.setFixedSize(ACTION_W, ACTION_H)
+        self.setToolTip(title)
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(18, 18, 18, 16)
-        lay.setSpacing(10)
-
-        self._chip = QLabel(self)
-        self._chip.setObjectName("startActionChip")
-        self._chip.setFixedSize(46, 46)
-        self._chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(self._chip)
+        lay.setContentsMargins(8, 12, 8, 12)
+        lay.setSpacing(12)
         lay.addStretch(1)
+
+        self._icon = QLabel(self)
+        self._icon.setObjectName("startActionIcon")
+        self._icon.setFixedSize(ACTION_ICON, ACTION_ICON)
+        self._icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(self._icon, 0, Qt.AlignmentFlag.AlignHCenter)
 
         self._title = QLabel(title, self)
         self._title.setObjectName("startActionTitle")
         self._title.setWordWrap(True)
+        self._title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         lay.addWidget(self._title)
-
-        self._subtitle = QLabel(subtitle, self)
-        self._subtitle.setObjectName("startActionText")
-        self._subtitle.setWordWrap(True)
-        lay.addWidget(self._subtitle)
+        lay.addStretch(1)
 
         self.apply_theme(theme)
 
     def apply_theme(self, theme):
         self._theme = theme
-        t = theme
-        self._chip.setPixmap(monochrome_icon(self._icon_key, "#ffffff")
-                             .pixmap(QSize(24, 24)))
+        self._icon.setPixmap(icon_pixmap(self._icon_key, CHROME["muted"],
+                                         ACTION_ICON))
         self.setStyleSheet(
-            self._card_qss("startActionCard")
-            + ("QLabel#startActionChip { background:%(accent)s;"
-               " border-radius:12px; }"
-               "QLabel#startActionTitle { color:%(text)s; font-size:16px;"
-               " font-weight:600; background:transparent; }"
-               "QLabel#startActionText { color:%(muted)s; font-size:12px;"
-               " background:transparent; }"
-               % {"accent": t.accent, "text": t.text, "muted": t.text_muted}))
+            "QFrame#startActionCard { background:transparent; border:none;"
+            " border-radius:14px; }"
+            "QFrame#startActionCard:hover { background:%(soft)s; }"
+            "QLabel#startActionIcon { background:transparent; }"
+            "QLabel#startActionTitle { color:%(text)s; font-size:14px;"
+            " font-weight:600; background:transparent; }"
+            % {"soft": CHROME["brand_soft"], "text": CHROME["text"]})
 
 
 class _RecentCard(_BaseCard):
@@ -183,7 +194,6 @@ class _RecentCard(_BaseCard):
 
     def apply_theme(self, theme):
         self._theme = theme
-        t = theme
         self.setStyleSheet(
             self._card_qss("startRecentCard")
             + ("QFrame#startRecentPreview { background:%(soft)s; border:none;"
@@ -193,16 +203,17 @@ class _RecentCard(_BaseCard):
                " font-weight:600; background:transparent; }"
                "QLabel#startRecentText { color:%(muted)s; font-size:11px;"
                " background:transparent; }"
-               % {"soft": t._brand_soft(), "r": int(t.radius),
-                  "text": t.text, "muted": t.text_muted}))
+               % {"soft": CHROME["brand_soft"], "r": 12,
+                  "text": CHROME["text"], "muted": CHROME["muted"]}))
 
 
 class _CardGrid(QWidget):
     """Holds fixed-size cards in a grid that reflows to the available width."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, cell_w=CARD_W):
         super().__init__(parent)
         self._cards = []
+        self._cell_w = cell_w
         self._grid = QGridLayout(self)
         self._grid.setContentsMargins(0, 0, 0, 0)
         self._grid.setHorizontalSpacing(CARD_GAP)
@@ -225,7 +236,7 @@ class _CardGrid(QWidget):
     def _reflow(self):
         if not self._cards:
             return
-        cols = max(1, (self.width() + CARD_GAP) // (CARD_W + CARD_GAP))
+        cols = max(1, (self.width() + CARD_GAP) // (self._cell_w + CARD_GAP))
         if cols == self._cols:
             return
         self._cols = cols
@@ -274,7 +285,7 @@ class StartView(QWidget):
         self._start_label = self._section_label("Start")
         col.addSpacing(8)
         col.addWidget(self._start_label)
-        self._actions = _CardGrid(content)
+        self._actions = _CardGrid(content, cell_w=ACTION_W)
         col.addWidget(self._actions)
 
         self._recent_label = self._section_label("Recent dashboards")
@@ -317,18 +328,15 @@ class StartView(QWidget):
         cards = []
         if self._can_continue:
             cont = _ActionCard(
-                self._theme, "home", "Continue current dashboard",
-                "Return to the dashboard you're editing.")
+                self._theme, "start_continue", "Continue current dashboard")
             cont.clicked.connect(self.continueRequested.emit)
             cards.append(cont)
         new_card = _ActionCard(
-            self._theme, "add_element", "New Dashboard",
-            "Start a blank dashboard in this project.")
+            self._theme, "start_new", "New Dashboard")
         new_card.clicked.connect(self.newRequested.emit)
         cards.append(new_card)
         open_card = _ActionCard(
-            self._theme, "open", "Open from file…",
-            "Open a saved .qdash dashboard file.")
+            self._theme, "open", "Open from file…")
         open_card.clicked.connect(self.openFileRequested.emit)
         cards.append(open_card)
         self._action_cards = cards
@@ -356,8 +364,9 @@ class StartView(QWidget):
         self._recents.setVisible(bool(cards))
 
     def apply_theme(self, theme):
+        # The Start screen is chrome: it keeps the fixed neutral CHROME look and
+        # is deliberately NOT recolored by the dashboard theme/preset.
         self._theme = theme
-        t = theme
         self.setStyleSheet(
             "#startView, #startScroll, #startContent { background:%(bg)s; }"
             "#startHeading { color:%(text)s; font-size:22px; font-weight:700;"
@@ -368,7 +377,7 @@ class StartView(QWidget):
             " background:transparent; }"
             "#startEmpty { color:%(muted)s; font-size:12px;"
             " background:transparent; }"
-            % {"bg": t.window_bg, "text": t.text, "muted": t.text_muted})
+            % {"bg": CHROME["bg"], "text": CHROME["text"], "muted": CHROME["muted"]})
         for card in getattr(self, "_action_cards", []):
             card.apply_theme(theme)
         for card in getattr(self, "_recent_cards", []):

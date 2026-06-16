@@ -25,8 +25,8 @@ for p in (root, here):
 # Import package submodules and expose them under bare names for the tests.
 _BARE = (
     "theme", "bus", "dashboard_canvas", "page_view", "window", "elements",
-    "add_element_dialog", "settings_dialog", "appearance_dialog",
-    "connections_dialog",
+    "add_element_dialog", "element_picker", "settings_dialog",
+    "appearance_dialog", "connections_dialog",
 )
 for mod in _BARE:
     sys.modules[mod] = importlib.import_module("{}.{}".format(pkg, mod))

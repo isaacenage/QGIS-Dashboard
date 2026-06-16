@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Per-element connections dialog — wire one tile's cross-filter links.
+"""Per-element connections editor — wire one tile's cross-filter links.
 
 ArcGIS source -> action -> target, made explicit and user-editable, but scoped
-to a *single* element (opened from that tile's right-click menu). The dialog
-shows the element's connections from its own perspective:
+to a *single* element (opened from that tile's right-click menu). It shows the
+element's connections from its own perspective:
 
 * if the element **is a filter source** (chart / pivot / selector), an outgoing
   section — "This filters →" — lists every candidate *target* (anything that
@@ -16,33 +16,34 @@ shows the element's connections from its own perspective:
 Dual-role tiles (chart, pivot) show both sections. A tile that neither sources
 nor accepts filters (e.g. the map) shows an explanatory note.
 
+The editing controls live in :class:`ConnectionsForm` (a plain ``QWidget``) so
+it can be embedded in the right-edge inspector panel. With ``live=True`` each
+checkbox writes its edge to the bus immediately (so cross-filtering previews as
+you tick); otherwise writes are deferred to :meth:`ConnectionsForm.apply`.
+
 All writes go through the bus edge-by-edge (:meth:`DashboardBus.set_connected`),
 so editing one tile never disturbs links that don't involve it.
+:class:`ElementConnectionsDialog` is a thin modal wrapper kept for standalone
+use and tests.
 """
 
-from qgis.PyQt.QtCore import Qt
+from qgis.PyQt.QtCore import Qt, pyqtSignal
 from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QGroupBox, QCheckBox, QLabel, QScrollArea,
     QWidget, QDialogButtonBox,
 )
 
 
-class ElementConnectionsDialog(QDialog):
-    """Edit the cross-filter links for a single *element*."""
+class ConnectionsForm(QWidget):
+    """Embeddable editor for one *element*'s cross-filter links."""
 
-    def __init__(self, bus, element, elements, parent=None):
+    changed = pyqtSignal()   # an edge was toggled (host may react)
+
+    def __init__(self, bus, element, elements, live=False, parent=None):
         super().__init__(parent)
         self.bus = bus
         self.element = element
-        self.setWindowTitle('Connections — {}'.format(element.display_name()))
-        self.resize(400, 480)
-
-        # The dialog is a top-level window, so the parent window's themed
-        # stylesheet does not always reach it — apply the dashboard theme
-        # directly so its surfaces/text never fall through to the (possibly
-        # dark) QGIS application palette.
-        if bus is not None and getattr(bus, "theme", None) is not None:
-            self.setStyleSheet(bus.theme.window_qss())
+        self._live = live
 
         # (peer_id, direction) -> QCheckBox, where direction is "out" (this
         # element filters the peer) or "in" (the peer filters this element).
@@ -55,7 +56,7 @@ class ElementConnectionsDialog(QDialog):
                       if element.accepts_filter else [])
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(18, 16, 18, 14)
+        root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(12)
 
         intro = QLabel(
@@ -98,11 +99,6 @@ class ElementConnectionsDialog(QDialog):
 
         col.addStretch(1)
 
-        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        btns.accepted.connect(self.accept)
-        btns.rejected.connect(self.reject)
-        root.addWidget(btns)
-
     def _section(self, title, peers, direction, is_on, empty_text):
         box = QGroupBox(title)
         lay = QVBoxLayout(box)
@@ -117,14 +113,60 @@ class ElementConnectionsDialog(QDialog):
             cb.setCursor(Qt.CursorShape.PointingHandCursor)
             cb.setChecked(is_on(peer))
             self._checks[(peer.id, direction)] = cb
+            cb.toggled.connect(
+                lambda on, pid=peer.id, d=direction: self._on_toggle(pid, d, on))
             lay.addWidget(cb)
         return box
 
+    def _on_toggle(self, peer_id, direction, on):
+        if self._live:
+            self._write_edge(peer_id, direction, on)
+        self.changed.emit()
+
+    def _write_edge(self, peer_id, direction, on):
+        eid = self.element.id
+        if direction == "out":      # this element → peer
+            self.bus.set_connected(eid, peer_id, on)
+        else:                       # peer → this element
+            self.bus.set_connected(peer_id, eid, on)
+
     def apply(self):
         """Write the ticked wiring back onto the bus, edge by edge."""
-        eid = self.element.id
         for (peer_id, direction), cb in self._checks.items():
-            if direction == "out":      # this element → peer
-                self.bus.set_connected(eid, peer_id, cb.isChecked())
-            else:                       # peer → this element
-                self.bus.set_connected(peer_id, eid, cb.isChecked())
+            self._write_edge(peer_id, direction, cb.isChecked())
+
+
+class ElementConnectionsDialog(QDialog):
+    """Modal wrapper around :class:`ConnectionsForm` (standalone / tests)."""
+
+    def __init__(self, bus, element, elements, parent=None):
+        super().__init__(parent)
+        self.bus = bus
+        self.element = element
+        self.setWindowTitle('Connections — {}'.format(element.display_name()))
+        self.resize(400, 480)
+
+        # The dialog is a top-level window, so the parent window's themed
+        # stylesheet does not always reach it — apply the dashboard theme
+        # directly so its surfaces/text never fall through to the (possibly
+        # dark) QGIS application palette.
+        if bus is not None and getattr(bus, "theme", None) is not None:
+            self.setStyleSheet(bus.theme.window_qss())
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 16, 18, 14)
+        root.setSpacing(12)
+        self._form = ConnectionsForm(bus, element, elements, live=False,
+                                     parent=self)
+        # expose the checkbox map so existing call sites/tests still reach it
+        self._checks = self._form._checks
+        root.addWidget(self._form, 1)
+
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
+                                | QDialogButtonBox.StandardButton.Cancel)
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        root.addWidget(btns)
+
+    def apply(self):
+        self._form.apply()

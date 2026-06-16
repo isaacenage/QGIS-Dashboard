@@ -40,6 +40,10 @@ class DashboardElement(QFrame):
     full_bleed = False         # when True the visualization fills the tile
                                # edge-to-edge: no title/description chrome and
                                # no internal padding (e.g. the live map mirror)
+    handles_own_body_drag = False   # when True the element drives its own
+                               # body drag in Build mode (e.g. the map), so the
+                               # tile keeps a thin top drag strip instead of the
+                               # full-tile drag overlay every other tile gets
 
     def __init__(self, bus, config=None, parent=None):
         super().__init__(parent)
@@ -227,6 +231,15 @@ class DashboardElement(QFrame):
         text, map) override and act on the flag.
         """
         self._interactive = bool(on)
+
+    def on_tile_double_click(self):
+        """Double-click on the tile body (Build mode only).
+
+        The Build-mode drag overlay covers the whole tile, so a double-click on
+        the body is routed here instead of reaching the element directly. Most
+        elements do nothing; the text tile overrides this to edit its text.
+        """
+        pass
 
     # ---- bus reaction ----
 

@@ -1,5 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Appearance dialog — edit the dashboard theme.
+"""Appearance editor — edit the dashboard theme.
+
+The editing controls live in :class:`AppearanceForm` (a plain ``QWidget``) so
+the same form can be **embedded** in two places:
+
+  - the Settings hub's *Appearance* page (whole-dashboard theme, applied live),
+  - the right-edge inspector panel (a single tile's override).
+
+:class:`AppearanceDialog` is a thin modal wrapper around the form, kept for
+backwards compatibility / standalone use.
 
 Two modes:
   - "global": edit the whole-dashboard theme (background, foreground, borders,
@@ -21,6 +30,7 @@ from qgis.PyQt.QtCore import Qt, pyqtSignal, QSize, QRectF
 
 from .theme import Theme, OVERRIDE_KEYS, DEFAULT_SERIES
 from . import presets
+from .form_util import compact_form, no_horizontal_scroll, shrink_combo
 
 # (key, label) for the simple color rows.
 # Note: ``chrome_bg`` (the window/tab/rail chrome) is intentionally NOT editable —
@@ -162,22 +172,27 @@ class _PaletteEditor(QWidget):
         self._rebuild()
 
 
-class AppearanceDialog(QDialog):
-    """Edit a Theme (global) or a tile override (element)."""
+class AppearanceForm(QWidget):
+    """Embeddable theme editor (global theme or one tile's override).
+
+    Emits :attr:`changed` on every control edit / preset choice so a host can
+    preview live. In global mode it can also call *on_apply* directly with the
+    freshly-built :class:`Theme` (used by the Settings hub for live preview).
+    """
+
+    changed = pyqtSignal()
 
     def __init__(self, theme, mode="global", on_apply=None, parent=None):
         super().__init__(parent)
         self.mode = mode
         self._on_apply = on_apply
         self._cleared = False
-        self.setWindowTitle("Tile appearance" if mode == "element"
-                            else "Dashboard appearance")
-        self.resize(420, 520)
-
+        self._base_theme = theme
         # Guards re-entrancy while a preset populates the controls below.
         self._loading = False
 
         root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
 
         # ---- preset gallery (global mode only) --------------------------
         # Presets set window/chrome colors that an element override can't carry,
@@ -185,6 +200,7 @@ class AppearanceDialog(QDialog):
         self._preset = None
         if mode == "global":
             self._preset = QComboBox()
+            shrink_combo(self._preset)
             self._preset.setIconSize(QSize(90, 22))
             self._preset.addItem(presets.CUSTOM)
             for name in presets.names():
@@ -193,13 +209,17 @@ class AppearanceDialog(QDialog):
             self._preset.setCurrentText(match or presets.CUSTOM)
             self._preset.currentIndexChanged.connect(self._on_preset_chosen)
             preset_row = QFormLayout()
+            compact_form(preset_row)
             preset_row.addRow("Preset theme", self._preset)
             root.addLayout(preset_row)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        no_horizontal_scroll(scroll)
         inner = QWidget()
         form = QFormLayout(inner)
+        compact_form(form)
         scroll.setWidget(inner)
         root.addWidget(scroll, 1)
 
@@ -207,83 +227,72 @@ class AppearanceDialog(QDialog):
         self._color_btns = {}
         for key, label in rows:
             btn = _ColorButton(getattr(theme, key))
-            btn.changed.connect(self._apply_live)
-            btn.changed.connect(self._mark_custom)
+            btn.changed.connect(self._on_edit)
             self._color_btns[key] = btn
             form.addRow(label, btn)
 
         # series palette
         self._palette = _PaletteEditor(theme.series)
-        self._palette.changed.connect(self._apply_live)
-        self._palette.changed.connect(self._mark_custom)
+        self._palette.changed.connect(self._on_edit)
         form.addRow("Chart series colors", self._palette)
 
         # fonts — body family + an optional separate heading family (a pairing)
         self._font = QFontComboBox()
+        shrink_combo(self._font)
         if theme.font_family:
             self._font.setCurrentFont(QFont(theme.font_family))
-        self._font.currentFontChanged.connect(self._apply_live)
-        self._font.currentFontChanged.connect(self._mark_custom)
+        self._font.currentFontChanged.connect(self._on_edit)
         form.addRow("Body font", self._font)
-        self._use_font = QCheckBox("Use this font (otherwise QGIS default)")
+        self._use_font = QCheckBox("Use this font")
+        self._use_font.setToolTip("Otherwise the QGIS default font is used")
         self._use_font.setChecked(bool(theme.font_family))
-        self._use_font.stateChanged.connect(self._apply_live)
-        self._use_font.stateChanged.connect(self._mark_custom)
+        self._use_font.stateChanged.connect(self._on_edit)
         form.addRow("", self._use_font)
 
         self._heading_font = QFontComboBox()
+        shrink_combo(self._heading_font)
         if theme.heading_font:
             self._heading_font.setCurrentFont(QFont(theme.heading_font))
         elif theme.font_family:
             self._heading_font.setCurrentFont(QFont(theme.font_family))
-        self._heading_font.currentFontChanged.connect(self._apply_live)
-        self._heading_font.currentFontChanged.connect(self._mark_custom)
+        self._heading_font.currentFontChanged.connect(self._on_edit)
         form.addRow("Heading font", self._heading_font)
-        self._use_heading = QCheckBox("Use a separate heading font (pairing)")
+        self._use_heading = QCheckBox("Separate heading font")
+        self._use_heading.setToolTip("Pair a different font for headings")
         self._use_heading.setChecked(bool(theme.heading_font))
-        self._use_heading.stateChanged.connect(self._apply_live)
-        self._use_heading.stateChanged.connect(self._mark_custom)
+        self._use_heading.stateChanged.connect(self._on_edit)
         form.addRow("", self._use_heading)
 
-        self._font_size = self._spin(theme.font_size, 6, 48)
-        form.addRow("Base font size", self._font_size)
-        self._title_size = self._spin(theme.title_size, 8, 48)
-        form.addRow("Title font size", self._title_size)
-        self._value_size = self._spin(theme.value_size, 10, 96)
-        form.addRow("Indicator value size", self._value_size)
-
-        if mode == "global":
-            self._radius = self._spin(theme.radius, 0, 32)
-            form.addRow("Tile corner radius", self._radius)
-        else:
-            self._radius = None
-
-        # buttons
-        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        # Text SIZES and corner radius are LAYOUT settings, not theme settings.
+        # In global mode they live in the Settings hub's *Layout* page (so the
+        # whole-dashboard theme editor here is purely colors + fonts and is not
+        # redundant with Layout). A per-tile override (element mode) may still
+        # tune its own text sizes; tiles never override the global radius.
+        self._radius = None
         if mode == "element":
-            clear = btns.addButton("Clear overrides",
-                                   QDialogButtonBox.ButtonRole.ResetRole)
-            clear.clicked.connect(self._clear)
+            self._font_size = self._spin(theme.font_size, 6, 48)
+            form.addRow("Base font size", self._font_size)
+            self._title_size = self._spin(theme.title_size, 8, 48)
+            form.addRow("Element title size", self._title_size)
+            self._value_size = self._spin(theme.value_size, 10, 96)
+            form.addRow("Indicator value size", self._value_size)
         else:
-            apply_btn = btns.addButton(QDialogButtonBox.StandardButton.Apply)
-            apply_btn.clicked.connect(self._apply_live)
-        btns.accepted.connect(self.accept)
-        btns.rejected.connect(self.reject)
-        root.addWidget(btns)
+            self._font_size = self._title_size = self._value_size = None
 
-        self._base_theme = theme
+        # element mode: a quiet "clear" affordance that drops the tile's
+        # override entirely (the tile falls back to the global theme).
+        if mode == "element":
+            clear = QPushButton("Clear overrides — use the dashboard theme")
+            clear.setProperty("variant", "secondary")
+            clear.clicked.connect(self._clear_overrides)
+            root.addWidget(clear, 0, Qt.AlignmentFlag.AlignLeft)
 
     def _spin(self, value, lo, hi):
         s = QSpinBox()
         s.setRange(lo, hi)
         s.setValue(int(value))
-        s.valueChanged.connect(self._apply_live)
-        s.valueChanged.connect(self._mark_custom)
+        s.valueChanged.connect(self._on_edit)
         return s
-
-    def _clear(self):
-        self._cleared = True
-        self.accept()
 
     def _font_family(self):
         return self._font.currentFont().family() if self._use_font.isChecked() else ""
@@ -292,6 +301,27 @@ class AppearanceDialog(QDialog):
         if self._use_heading.isChecked():
             return self._heading_font.currentFont().family()
         return ""
+
+    # ---- editing / preview ---------------------------------------------
+
+    def _on_edit(self, *_):
+        """A manual control edit: no longer cleared, flip preset to Custom,
+        notify the host, and (global) live-apply."""
+        if self._loading:
+            return
+        self._cleared = False
+        self._mark_custom()
+        self.changed.emit()
+        if self.mode == "global" and self._on_apply:
+            self._on_apply(self.result_theme())
+
+    def _clear_overrides(self):
+        """Drop the tile override; the tile renders with the global theme."""
+        self._cleared = True
+        self.changed.emit()
+
+    def is_cleared(self):
+        return self._cleared
 
     # ---- presets --------------------------------------------------------
 
@@ -310,6 +340,8 @@ class AppearanceDialog(QDialog):
             return
         # Layer the preset over the current theme so radius/sizes are kept.
         self._populate_from_theme(presets.theme_for(name, self._base_theme))
+        self._cleared = False
+        self.changed.emit()
         if self.mode == "global" and self._on_apply:
             self._on_apply(self.result_theme())
 
@@ -327,9 +359,12 @@ class AppearanceDialog(QDialog):
             head = theme.heading_font or theme.font_family
             if head:
                 self._heading_font.setCurrentFont(QFont(head))
-            self._font_size.setValue(int(theme.font_size))
-            self._title_size.setValue(int(theme.title_size))
-            self._value_size.setValue(int(theme.value_size))
+            if self._font_size is not None:
+                self._font_size.setValue(int(theme.font_size))
+            if self._title_size is not None:
+                self._title_size.setValue(int(theme.title_size))
+            if self._value_size is not None:
+                self._value_size.setValue(int(theme.value_size))
             if self._radius is not None:
                 self._radius.setValue(int(theme.radius))
         finally:
@@ -343,9 +378,14 @@ class AppearanceDialog(QDialog):
         data["series"] = self._palette.colors()
         data["font_family"] = self._font_family()
         data["heading_font"] = self._heading_family()
-        data["font_size"] = self._font_size.value()
-        data["title_size"] = self._title_size.value()
-        data["value_size"] = self._value_size.value()
+        # Sizes/radius are Layout-owned; only set them if this form exposes them
+        # (element mode), otherwise keep the base theme's values.
+        if self._font_size is not None:
+            data["font_size"] = self._font_size.value()
+        if self._title_size is not None:
+            data["title_size"] = self._title_size.value()
+        if self._value_size is not None:
+            data["value_size"] = self._value_size.value()
         if self._radius is not None:
             data["radius"] = self._radius.value()
         return Theme.from_dict(data)
@@ -360,13 +400,41 @@ class AppearanceDialog(QDialog):
         ov["series"] = self._palette.colors()
         ov["font_family"] = self._font_family()
         ov["heading_font"] = self._heading_family()
-        ov["font_size"] = self._font_size.value()
-        ov["title_size"] = self._title_size.value()
-        ov["value_size"] = self._value_size.value()
+        if self._font_size is not None:
+            ov["font_size"] = self._font_size.value()
+        if self._title_size is not None:
+            ov["title_size"] = self._title_size.value()
+        if self._value_size is not None:
+            ov["value_size"] = self._value_size.value()
         return {k: v for k, v in ov.items() if k in OVERRIDE_KEYS}
 
-    def _apply_live(self, *_):
-        if self._loading:
-            return
-        if self.mode == "global" and self._on_apply:
-            self._on_apply(self.result_theme())
+
+class AppearanceDialog(QDialog):
+    """Modal wrapper around :class:`AppearanceForm` (standalone / legacy use)."""
+
+    def __init__(self, theme, mode="global", on_apply=None, parent=None):
+        super().__init__(parent)
+        self.mode = mode
+        self.setWindowTitle("Tile appearance" if mode == "element"
+                            else "Dashboard appearance")
+        self.resize(420, 520)
+
+        root = QVBoxLayout(self)
+        self._form = AppearanceForm(theme, mode=mode, on_apply=on_apply,
+                                    parent=self)
+        root.addWidget(self._form, 1)
+
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
+                                | QDialogButtonBox.StandardButton.Cancel)
+        if mode == "global":
+            apply_btn = btns.addButton(QDialogButtonBox.StandardButton.Apply)
+            apply_btn.clicked.connect(self._form._on_edit)
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        root.addWidget(btns)
+
+    def result_theme(self):
+        return self._form.result_theme()
+
+    def result_override(self):
+        return self._form.result_override()

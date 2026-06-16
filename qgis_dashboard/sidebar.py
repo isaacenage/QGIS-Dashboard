@@ -17,6 +17,7 @@ from qgis.PyQt.QtCore import QSize, Qt
 from qgis.PyQt.QtWidgets import QFrame, QLabel, QToolButton, QVBoxLayout
 
 from .icons import logo_pixmap, monochrome_icon
+from .theme import CHROME
 
 RAIL_WIDTH = 56
 BUTTON_SIZE = 40
@@ -60,7 +61,9 @@ class Sidebar(QFrame):
         btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         btn.setFixedSize(BUTTON_SIZE, BUTTON_SIZE)
         btn.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
-        icon = monochrome_icon(icon_key, self._theme.text)
+        # Rail icons are CHROME: a fixed tint that the dashboard theme never
+        # touches (the theme styles the canvas only).
+        icon = monochrome_icon(icon_key, CHROME["text"])
         if icon.isNull():
             btn.setText(tooltip[:2])          # graceful fallback if QtSvg is missing
         else:
@@ -84,10 +87,11 @@ class Sidebar(QFrame):
     # ---- theming ----
 
     def apply_theme(self, theme):
-        """Re-tint every glyph + the logo for a new (global) theme."""
+        """Kept for API symmetry; the rail is fixed chrome, so a theme change
+        does not re-tint its glyphs (they use the constant ``CHROME`` tint)."""
         self._theme = theme
         self._logo.setPixmap(logo_pixmap(LOGO_SIZE))
         for btn, icon_key in self._buttons:
-            icon = monochrome_icon(icon_key, theme.text)
+            icon = monochrome_icon(icon_key, CHROME["text"])
             if not icon.isNull():
                 btn.setIcon(icon)

@@ -213,6 +213,95 @@ ICONS = {
         '10.0036V8ZM14 16C14 17.1046 13.1046 18 12 18C10.8954 18 10 17.1046 10 16C10 '
         '14.8954 10.8954 14 12 14C13.1046 14 14 14.8954 14 16Z"/>'
         '</svg>'),
+
+    # --- element-type glyphs (the Add-element picker) ----------------------
+    # One per registered element type; keyed "el_<type_name>" so the picker
+    # can look them up generically. Same monochrome stroke style as the rail
+    # glyphs above, so they tint to the active theme.
+    # indicator — a gauge with a needle (one big KPI value)
+    "el_indicator": _stroke(
+        '<path d="M4.5 16a7.5 7.5 0 0 1 15 0"/>'
+        '<line x1="12" y1="16" x2="16" y2="11.5"/>'
+        '<circle cx="12" cy="16" r="1.1"/>'),
+    # chart — three vertical bars on a baseline
+    "el_chart": _stroke(
+        '<line x1="4" y1="18.5" x2="20" y2="18.5"/>'
+        '<rect x="5.6" y="11" width="3.1" height="7" rx="0.6"/>'
+        '<rect x="10.4" y="6.5" width="3.1" height="11.5" rx="0.6"/>'
+        '<rect x="15.2" y="13" width="3.1" height="5" rx="0.6"/>'),
+    # pivot / matrix — a table with a header row + first column
+    "el_pivot": _stroke(
+        '<rect x="3.5" y="4.5" width="17" height="15" rx="1.8"/>'
+        '<line x1="3.5" y1="9.5" x2="20.5" y2="9.5"/>'
+        '<line x1="9" y1="4.5" x2="9" y2="19.5"/>'),
+    # list — bulleted rows
+    "el_list": _stroke(
+        '<line x1="9" y1="7" x2="19" y2="7"/>'
+        '<line x1="9" y1="12" x2="19" y2="12"/>'
+        '<line x1="9" y1="17" x2="19" y2="17"/>'
+        '<circle cx="5.2" cy="7" r="0.5"/>'
+        '<circle cx="5.2" cy="12" r="0.5"/>'
+        '<circle cx="5.2" cy="17" r="0.5"/>'),
+    # map — a location pin (the live canvas mirror)
+    "el_map": _stroke(
+        '<path d="M12 21c4.2-4.3 6-7.2 6-10a6 6 0 1 0-12 0c0 2.8 1.8 5.7 6 10z"/>'
+        '<circle cx="12" cy="11" r="2.2"/>'),
+    # category selector — a dropdown box with a value + chevron
+    "el_category_selector": _stroke(
+        '<rect x="3.5" y="7.5" width="17" height="9" rx="2"/>'
+        '<line x1="6" y1="12" x2="11" y2="12"/>'
+        '<polyline points="13.6 11 15.8 13.2 18 11"/>'),
+    # text / heading — a serif "T"
+    "el_text": _stroke(
+        '<path d="M6 6.5V5h12v1.5"/>'
+        '<line x1="12" y1="5" x2="12" y2="19"/>'
+        '<line x1="9.2" y1="19" x2="14.8" y2="19"/>'),
+    # image — a framed picture (sun + mountains)
+    "el_image": _stroke(
+        '<rect x="3.5" y="5" width="17" height="14" rx="2"/>'
+        '<circle cx="8.6" cy="10" r="1.5"/>'
+        '<path d="M4 17.5l4.8-4.6 3.2 3.1 3.4-3.3 5 5"/>'),
+    # header — a brand banner: a logo square + title line in a top band
+    "el_header": _stroke(
+        '<rect x="3.5" y="5" width="17" height="14" rx="2"/>'
+        '<line x1="3.5" y1="10.5" x2="20.5" y2="10.5"/>'
+        '<rect x="6" y="6.7" width="2.4" height="2.4" rx="0.5"/>'
+        '<line x1="9.6" y1="7.9" x2="15.5" y2="7.9"/>'),
+
+    # --- Start screen action glyphs ----------------------------------------
+    # These ship their own artwork (not the _stroke template); the tint still
+    # recolors every opaque pixel, so only the shape matters.
+    # Continue current dashboard — a monitor with a chart line + an up-arrow
+    # (restore the dashboard onto the screen).
+    "start_continue": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2.4 -2.4 20.8 20.8">'
+        '<g fill="#000">'
+        '<path d="M14 5V3h-2.002z"/>'
+        '<path d="M2 7v8h9v-1H3V6.333zm11.002-1L13 15h1V7z"/>'
+        '<path d="M8 8.986a8.47 8.47 0 0 1 .607-.122 5.24 5.24 0 0 1 .872-.064c.295 0 '
+        '.54.043.735.129.195.08.35.197.465.35.119.147.202.326.25.535.047.21.071.44.071.693V14.2H8z"/>'
+        '<path d="M8 .293L.146 8.146l.708.708L8 1.707l7.146 7.147.708-.708z" '
+        'fill-rule="evenodd"/>'
+        '</g></svg>'),
+    # New Dashboard — a window/browser frame with a centered plus sign
+    "start_new": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 212.973 212.973" fill="#000">'
+        '<path d="M177.846,48.966c1.971,0,3.9-0.81,5.301-2.2c1.399-1.4,2.199-3.33,2.199-5.3c0-1.98-0.8-3.91-2.199-5.31 '
+        'c-1.4-1.39-3.33-2.19-5.301-2.19c-1.98,0-3.909,0.8-5.31,2.19c-1.4,1.4-2.2,3.33-2.2,5.31c0,1.97,0.8,3.9,2.2,5.3 '
+        'C173.936,48.156,175.866,48.966,177.846,48.966z"/>'
+        '<path d="M150.846,48.966c1.971,0,3.9-0.8,5.301-2.2c1.399-1.4,2.199-3.33,2.199-5.31c0-1.97-0.8-3.9-2.199-5.3 '
+        'c-1.4-1.39-3.33-2.19-5.301-2.19c-1.98,0-3.909,0.8-5.31,2.19c-1.4,1.4-2.2,3.33-2.2,5.3c0,1.98,0.8,3.91,2.2,5.31 '
+        'C146.936,48.166,148.866,48.966,150.846,48.966z"/>'
+        '<path d="M123.846,48.966c1.971,0,3.9-0.81,5.301-2.2c1.399-1.4,2.199-3.33,2.199-5.3c0-1.98-0.8-3.91-2.199-5.31 '
+        'c-1.4-1.39-3.33-2.19-5.301-2.19c-1.979,0-3.909,0.8-5.31,2.19c-1.39,1.4-2.19,3.33-2.19,5.31c0,1.97,0.801,3.9,2.19,5.3 '
+        'C119.937,48.156,121.866,48.966,123.846,48.966z"/>'
+        '<path d="M205.473,10.678H7.5c-4.143,0-7.5,3.358-7.5,7.5v176.617c0,4.142,3.357,7.5,7.5,7.5h197.973c4.143,0,7.5-3.358,7.5-7.5 '
+        'V18.178C212.973,14.036,209.615,10.678,205.473,10.678z M197.973,25.678v31.571H15V25.678H197.973z M15,187.295V72.249h182.973 '
+        'V187.295H15z"/>'
+        '<path d="M136.998,122.271h-23.012V99.26c0-4.142-3.357-7.5-7.5-7.5s-7.5,3.358-7.5,7.5v23.012H75.975c-4.143,0-7.5,3.358-7.5,7.5 '
+        'c0,4.142,3.357,7.5,7.5,7.5h23.012v23.013c0,4.142,3.357,7.5,7.5,7.5s7.5-3.358,7.5-7.5v-23.013h23.012c4.143,0,7.5-3.358,7.5-7.5 '
+        'C144.498,125.629,141.141,122.271,136.998,122.271z"/>'
+        '</svg>'),
 }
 
 
@@ -300,6 +389,18 @@ def monochrome_icon(name, color, size=22):
     if not svg:
         return QIcon()
     return QIcon(_render_px(svg, size, tint=color, supersample=_SS))
+
+
+def icon_pixmap(name, color, size=22):
+    """A crisp single-color :class:`QPixmap` for one glyph (no :class:`QIcon`).
+
+    Like :func:`monochrome_icon` but returns the pixmap directly, rendered at
+    *size* logical px so large glyphs stay sharp instead of being upscaled.
+    """
+    svg = ICONS.get(name)
+    if not _HAS_SVG or not svg:
+        return QPixmap()
+    return _render_px(svg, size, tint=color, supersample=_SS)
 
 
 def logo_pixmap(size=64):

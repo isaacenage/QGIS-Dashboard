@@ -28,7 +28,8 @@ from qgis.PyQt.QtCore import Qt, QSize, QEvent, QTimer, pyqtSignal
 from qgis.core import QgsProject
 
 from .bus import DashboardBus
-from .theme import Theme
+from .theme import Theme, CHROME
+from .layout_util import default_locked
 from . import project_io
 from .recent_store import RecentStore
 from .start_view import StartView
@@ -36,20 +37,27 @@ from .fonts import ensure_fonts_registered
 from .icons import logo_icon, monochrome_icon
 from .sidebar import Sidebar
 from .minimized_bubble import MinimizedBubble
-from .dashboard_canvas import DashboardCanvas
+from .dashboard_canvas import (
+    DashboardCanvas, DEFAULT_REGION_W, DEFAULT_REGION_H, MARGIN as CANVAS_MARGIN)
 from .page_view import PageView
-from .elements import create_element
-from .elements.header_layout import resolve_header
-from .add_element_dialog import AddElementDialog
+from .elements import create_element, ELEMENT_LABELS
+from .elements.header_layout import materialize_header_tiles
+from .add_element_dialog import AddElementDialog, ElementConfigForm
+from .element_picker import ElementPicker
 from .settings_dialog import SettingsDialog
-from .appearance_dialog import AppearanceDialog
-from .connections_dialog import ElementConnectionsDialog
+from .appearance_dialog import AppearanceForm
+from .connections_dialog import ConnectionsForm
+from .side_panel import InspectorPanel
 
 PROJECT_SCOPE = "QgisDashboard"
 PROJECT_KEY = "layout"
 DEFAULT_COLS = 12
 DEFAULT_ROWS = 8
 DEFAULT_GAP = 0   # global element gap (logical px): cards may touch by default
+# the export/print region (the "page") — one global size for the whole dashboard
+DEFAULT_CANVAS_W = DEFAULT_REGION_W
+DEFAULT_CANVAS_H = DEFAULT_REGION_H
+CANVAS_SIZE_STEP = 40   # round a content-derived region up to a tidy multiple
 
 
 def migrate_layout(raw):
@@ -57,8 +65,8 @@ def migrate_layout(raw):
 
     v3 shape::
 
-        {version, grid:{cols,rows}, theme, window, active_page,
-         pages:[{id, title, connections, elements:[...]}]}
+        {version, grid:{cols,rows}, gap, canvas:{w,h}?, theme, window, locked,
+         active_page, pages:[{id, title, connections, elements:[...]}]}
     """
     if not raw:
         raw = {"elements": []}
@@ -73,6 +81,9 @@ def migrate_layout(raw):
         "grid": {"cols": grid.get("cols", DEFAULT_COLS),
                  "rows": grid.get("rows", DEFAULT_ROWS)},
         "gap": int(raw.get("gap", DEFAULT_GAP)),
+        # the export/print region; absent in older blobs (resolved from the
+        # content bounding box on apply so existing exports don't change)
+        "canvas": raw.get("canvas") or None,
         "theme": raw.get("theme") or {},
         "window": raw.get("window", {}),
         # optional global header (brand banner); absent in v1/v2/older v3 blobs
@@ -104,6 +115,12 @@ def migrate_layout(raw):
         }
         out["pages"] = [page]
         out["active_page"] = page["id"]
+
+    # Lock/Use mode: persisted as a top-level bool. Older blobs (no key) default
+    # via content — a dashboard with tiles opens in Use mode, an empty one in
+    # Build mode — so existing dashboards open ready to use, not ready to edit.
+    out["locked"] = (bool(raw["locked"]) if "locked" in raw
+                     else default_locked(out))
     return out
 
 
@@ -115,9 +132,6 @@ class DashboardPage:
         self.title = title
         self.view = view
         self.canvas = view.canvas
-        # optional per-page header (brand banner) config, or None. A global
-        # header (window._global_header) is shown when this is None.
-        self.header_config = None
 
 
 class DashboardWindow(QMainWindow):
@@ -152,9 +166,9 @@ class DashboardWindow(QMainWindow):
         # moved/resized. Off by default so the dashboard is editable on open.
         self._editing_locked = False
 
-        # global header (brand banner) config shown on every page that lacks
-        # its own per-page header, or None when there is no global header.
-        self._global_header = None
+        # set when a dashboard is loaded/created while the window is hidden, so
+        # the first show fits the export/print region to the viewport.
+        self._needs_reframe = False
 
         # left icon rail + (tab strip over page stack)
         self._build_sidebar()
@@ -186,6 +200,14 @@ class DashboardWindow(QMainWindow):
         row.addWidget(self.sidebar)
         row.addWidget(self._content_stack, 1)
         self.setCentralWidget(container)
+
+        # ArcGIS-style right-edge inspector that overlays the canvas. It hosts
+        # the tile/header editors (Configure / Connections / appearance) one at
+        # a time, opened only from a tile's right-click menu — never modal.
+        self._inspector = InspectorPanel(self.bus.theme, container)
+        # the Add-element picker is a matching slim panel docked on the LEFT,
+        # flush against the rail; created lazily on first open.
+        self._element_picker = None
 
         self._tab_bar.currentChanged.connect(self._on_tab_changed)
         self._tab_bar.tabBarDoubleClicked.connect(self._rename_page_at)
@@ -221,11 +243,9 @@ class DashboardWindow(QMainWindow):
         self.sidebar = Sidebar(self.bus.theme, self)
         self.sidebar.add_action(
             "home", "Home — recent dashboards", self.show_start)
-        self.sidebar.add_action(
-            "save", "Save dashboard to a file", self.save_to_file)
         self.sidebar.add_separator()
-        self.sidebar.add_action(
-            "add_element", "Add element", self.add_element_dialog)
+        self._add_element_btn = self.sidebar.add_action(
+            "add_element", "Add element", self.open_element_picker)
         self.sidebar.add_action(
             "add_page", "Add page", self._add_page_interactive)
         self.sidebar.add_separator()
@@ -238,7 +258,9 @@ class DashboardWindow(QMainWindow):
         self.sidebar.add_action(
             "clear_filter", "Clear filter", self.bus.clear_all_filters)
         self.sidebar.add_separator()
-        # Settings hub (Appearance, About) lives at the foot of the rail.
+        # Save + the Settings hub (Appearance, About) live at the foot of the rail.
+        self.sidebar.add_action(
+            "save", "Save dashboard to a file", self.save_to_file)
         self.sidebar.add_action("settings", "Settings", self.open_settings)
 
     def _build_tab_strip(self):
@@ -269,7 +291,7 @@ class DashboardWindow(QMainWindow):
     def _make_strip_button(self, icon_name, tooltip, checkable=False):
         btn = QToolButton()
         btn.setObjectName("dashRailButton")   # reuse the rail's themed hover/focus
-        btn.setIcon(monochrome_icon(icon_name, self.bus.theme.text_muted))
+        btn.setIcon(monochrome_icon(icon_name, CHROME["muted"]))
         btn.setIconSize(QSize(18, 18))
         btn.setFixedSize(30, 28)
         btn.setAutoRaise(True)
@@ -279,14 +301,29 @@ class DashboardWindow(QMainWindow):
         return btn
 
     def _on_lock_toggled(self, locked):
+        self._set_editing_locked(locked, update_button=False)
+
+    def _set_editing_locked(self, locked, *, update_button=True):
+        """Switch the whole dashboard between Build (unlocked) and Use (locked).
+
+        Build mode = tiles move/resize/configure, contents inert; Use mode =
+        geometry fixed, contents interactive (chart click → filter, map pan /
+        identify / fly-to). ``update_button`` keeps the toggle in sync when the
+        mode is applied programmatically (e.g. restored from a saved file).
+        """
         self._editing_locked = bool(locked)
+        if update_button:
+            self._lock_btn.blockSignals(True)
+            self._lock_btn.setChecked(self._editing_locked)
+            self._lock_btn.blockSignals(False)
         self._lock_btn.setIcon(monochrome_icon(
-            "lock" if locked else "unlock", self.bus.theme.text_muted))
+            "lock" if self._editing_locked else "unlock", CHROME["muted"]))
         self._lock_btn.setToolTip(
-            "Unlock layout — allow moving/resizing tiles" if locked
-            else "Lock layout — prevent moving/resizing tiles")
+            "Unlock to edit — currently in Use mode (tiles fixed, interactive)"
+            if self._editing_locked
+            else "Lock to use — currently in Build mode (move/resize/configure)")
         for page in self._pages:
-            page.canvas.set_locked(locked)
+            page.canvas.set_locked(self._editing_locked)
 
     def _open_export_menu(self):
         menu = QMenu(self)
@@ -325,6 +362,28 @@ class DashboardWindow(QMainWindow):
         if view is not None:
             view.reset_zoom()
 
+    def _reframe_current(self):
+        """Fit the current page's export/print region to the viewport."""
+        view = self.current_view()
+        if view is not None:
+            view.reset_zoom()
+
+    def _schedule_reframe(self):
+        """Reframe the page now (if shown) or on the next show (if hidden).
+
+        Deferred a tick so the viewport has its final size before fitting.
+        """
+        if self.isVisible():
+            QTimer.singleShot(0, self._reframe_current)
+        else:
+            self._needs_reframe = True
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        if self._needs_reframe:
+            self._needs_reframe = False
+            QTimer.singleShot(0, self._reframe_current)
+
     def _apply_window_style(self):
         self.setStyleSheet(self.bus.theme.window_qss())
         cur = self.current_canvas()
@@ -334,12 +393,15 @@ class DashboardWindow(QMainWindow):
     def _on_theme_changed(self):
         self.sidebar.apply_theme(self.bus.theme)
         self.start_view.apply_theme(self.bus.theme)
+        self._inspector.apply_theme(self.bus.theme)
+        if self._element_picker is not None:
+            self._element_picker.apply_theme(self.bus.theme)
         self._apply_window_style()
-        # re-tint the tab-strip buttons to the new theme
-        muted = self.bus.theme.text_muted
+        # The tab-strip buttons are chrome — keep them at the fixed CHROME tint
+        # (a theme change must not recolor them).
         self._lock_btn.setIcon(monochrome_icon(
-            "lock" if self._editing_locked else "unlock", muted))
-        self._export_btn.setIcon(monochrome_icon("export", muted))
+            "lock" if self._editing_locked else "unlock", CHROME["muted"]))
+        self._export_btn.setIcon(monochrome_icon("export", CHROME["muted"]))
 
     def _update_filter_label(self):
         n = self.bus.active_filter_count()
@@ -370,7 +432,9 @@ class DashboardWindow(QMainWindow):
         self._apply_window_style()
         self.add_page("Page 1")
         self._apply_grid_to_all(DEFAULT_COLS, DEFAULT_ROWS)
+        self._set_editing_locked(False)   # a blank dashboard opens in Build mode
         self.show_dashboard()
+        self._schedule_reframe()
 
     # ---- standalone .qdash save / open ----
 
@@ -459,11 +523,18 @@ class DashboardWindow(QMainWindow):
     def canvas_gap(self):
         return self._pages[0].canvas.gap if self._pages else DEFAULT_GAP
 
+    def canvas_size(self):
+        """The global export/print region ``(w, h)`` (logical px)."""
+        if self._pages:
+            return self._pages[0].canvas.region_size()
+        return (DEFAULT_CANVAS_W, DEFAULT_CANVAS_H)
+
     def add_page(self, title, page_id=None, make_active=True):
         page_id = page_id or uuid.uuid4().hex[:8]
         canvas = DashboardCanvas(self.bus, self.canvas_cols(), self.canvas_rows())
         canvas.set_locked(self._editing_locked)   # honour the current layout lock
         canvas.set_gap(self.canvas_gap())          # honour the current element gap
+        canvas.set_region(*self.canvas_size())     # honour the current page size
         view = PageView(canvas)
         page = DashboardPage(page_id, title, view)
         self._pages.append(page)
@@ -510,6 +581,9 @@ class DashboardWindow(QMainWindow):
         self.add_page("Page {}".format(len(self._pages) + 1))
 
     def _on_tab_changed(self, idx):
+        # an open editor belongs to the page being left — keep its live edits
+        if getattr(self, "_inspector", None) is not None:
+            self._inspector.close_active(commit=True)
         if 0 <= idx < len(self._pages):
             page = self._pages[idx]
             self._stack.setCurrentWidget(page.view)
@@ -556,20 +630,37 @@ class DashboardWindow(QMainWindow):
         page = self.current_page()
         return [t.element for t in page.canvas.tiles()] if page else []
 
-    def add_element_dialog(self):
-        dlg = AddElementDialog(self)
-        if dlg.exec():
-            type_name, cfg = dlg.result_config()
-            self.add_element(type_name, cfg)
+    def open_element_picker(self):
+        """Toggle the Add-element picker — a slim panel docked flush to the
+        right of the rail.
+
+        The picker chooses *only* the element type (AGOL Experience-Builder
+        style); the tile is added with sensible defaults and configured
+        afterward from its right-click ``Configure…`` menu (in the inspector).
+        """
+        if self._element_picker is None:
+            self._element_picker = ElementPicker(self.bus.theme,
+                                                 self.centralWidget())
+            self._element_picker.elementChosen.connect(self._on_element_chosen)
+        self._element_picker.open_beside(self.sidebar)
+
+    def _on_element_chosen(self, type_name):
+        # Adding a tile is a Build-mode action: drop the lock so the new tile is
+        # movable/configurable rather than landing fixed-and-interactive.
+        if self._editing_locked:
+            self._set_editing_locked(False)
+        if type_name == "header":
+            # the title doubles as the banner text — start blank to configure
+            config = {"title": ""}
+        else:
+            # seed a friendly default title
+            config = {"title": ELEMENT_LABELS.get(type_name, type_name.title())}
+        self.add_element(type_name, config)
 
     def add_element(self, type_name, config, grid_rect=None):
         page = self.current_page()
         if page is None:
             page = self.add_page("Page 1")
-        if type_name == "header":
-            # the header is not a grid tile — it docks to a page edge
-            self._set_header_from_config(page, config)
-            return None
         return self._add_element_to(page, type_name, config, grid_rect)
 
     def _add_element_to(self, page, type_name, config, grid_rect=None):
@@ -578,131 +669,161 @@ class DashboardWindow(QMainWindow):
         tile.styleRequested.connect(self._edit_tile_style)
         tile.connectionsRequested.connect(self._edit_tile_connections)
         tile.configureRequested.connect(self._edit_tile_config)
+        # if this tile is removed while the inspector edits it, drop the panel
+        # without running its callbacks (the element is being destroyed)
+        tile.closeRequested.connect(self._inspector.discard_if_subject)
         return tile
 
     def _edit_tile_config(self, element):
-        """Reopen the per-type config form on a live tile (the Configure menu).
+        """Edit the per-type config of a live tile in the inspector panel.
 
-        Managed keys are replaced wholesale (a cleared field drops its key);
-        unmanaged keys — id, per-tile style override, base_filter — are kept.
+        Edits preview live (debounced): managed keys are replaced wholesale (a
+        cleared field drops its key) while unmanaged keys — id, per-tile style
+        override, base_filter — are kept. Cancel restores the original config.
         """
-        dlg = AddElementDialog(self, element=element)
-        if not dlg.exec():
-            return
-        _type, cfg = dlg.result_config()
-        new_config = dict(element.config)
-        for key in dlg.managed_keys():
-            if key in cfg:
-                new_config[key] = cfg[key]
-            else:
-                new_config.pop(key, None)
-        new_config["id"] = element.id
-        element.config = new_config
-        element.reconfigure()
+        original = dict(element.config)
+        form = ElementConfigForm(element=element)
+
+        def do_apply():
+            _type, cfg = form.result_config()
+            new_config = dict(element.config)
+            for key in form.managed_keys():
+                if key in cfg:
+                    new_config[key] = cfg[key]
+                else:
+                    new_config.pop(key, None)
+            new_config["id"] = element.id
+            element.config = new_config
+            element.reconfigure()
+
+        debounce = self._make_debounce(do_apply)
+        form.changed.connect(lambda: debounce.start())
+
+        def commit():
+            debounce.stop()
+            do_apply()
+
+        def cancel():
+            debounce.stop()
+            element.config = original
+            element.reconfigure()
+
+        self._inspector.open_editor(
+            "Configure — {}".format(element.display_name()),
+            form, on_commit=commit, on_cancel=cancel, subject=element)
 
     def _edit_tile_style(self, element):
+        """Edit one tile's appearance override in the inspector, live."""
         seed = self.bus.theme.merged_with(element.config.get("style"))
-        dlg = AppearanceDialog(seed, mode="element", parent=self)
-        if dlg.exec():
-            override = dlg.result_override()   # None == cleared
-            if override:
-                element.config["style"] = override
+        style = element.config.get("style")
+        original = dict(style) if isinstance(style, dict) else None
+        form = AppearanceForm(seed, mode="element")
+
+        def live():
+            if form.is_cleared():
+                element.config.pop("style", None)
+            else:
+                override = form.result_override()
+                if override:
+                    element.config["style"] = override
+                else:
+                    element.config.pop("style", None)
+            element.apply_theme()
+
+        form.changed.connect(live)
+
+        def cancel():
+            if original is not None:
+                element.config["style"] = original
             else:
                 element.config.pop("style", None)
             element.apply_theme()
 
-    # ---- header (brand banner) ----
+        self._inspector.open_editor(
+            "Tile appearance — {}".format(element.display_name()),
+            form, on_commit=live, on_cancel=cancel, subject=element)
 
-    def header_for_page(self, page):
-        """The resolved header config a page renders (per-page over global)."""
-        return resolve_header(page.header_config, self._global_header)
-
-    def _set_header_from_config(self, page, config):
-        """Add/replace a header from a config dialog result.
-
-        The dialog's ``scope_all_pages`` checkbox decides whether the header is
-        global (shown on every page) or local to *page*; it is not persisted on
-        the config itself.
-        """
-        cfg = dict(config)
-        all_pages = bool(cfg.pop("scope_all_pages", False))
-        cfg.pop("id", None)
-        if all_pages:
-            self._global_header = cfg
-        else:
-            page.header_config = cfg
-        self._refresh_all_headers()
-
-    def _refresh_all_headers(self):
-        """Rebuild every page's docked banner from the resolved header config."""
-        for page in self._pages:
-            cfg = self.header_for_page(page)
-            if not cfg:
-                page.view.set_header(None)
-                continue
-            element = create_element("header", self.bus, dict(cfg), None)
-            element._dash_page = page
-            element._dash_scope = "page" if page.header_config else "global"
-            element.configureRequested.connect(self._configure_header)
-            element.removeRequested.connect(self._remove_header)
-            page.view.set_header(element)
-
-    def _configure_header(self, element):
-        """Reopen the header config form; the checkbox can move it global<->page."""
-        page = element._dash_page
-        was_global = element._dash_scope == "global"
-        dlg = AddElementDialog(self, element=element)
-        chk = dlg._dyn.get("scope_all_pages")
-        if chk is not None:
-            chk.setChecked(was_global)
-        if not dlg.exec():
-            return
-        _type, cfg = dlg.result_config()
-        now_global = bool(cfg.pop("scope_all_pages", False))
-        cfg.pop("id", None)
-        # clear the slot it came from, then write to the chosen slot, so a
-        # header is never left in both the global and per-page slots
-        if was_global:
-            self._global_header = None
-        else:
-            page.header_config = None
-        if now_global:
-            self._global_header = cfg
-        else:
-            page.header_config = cfg
-        self._refresh_all_headers()
-
-    def _remove_header(self, element):
-        page = element._dash_page
-        if element._dash_scope == "global":
-            self._global_header = None
-        else:
-            page.header_config = None
-        self._refresh_all_headers()
+    def _make_debounce(self, fn, msec=160):
+        """A single-shot QTimer that runs *fn* shortly after the last start()."""
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.setInterval(msec)
+        timer.timeout.connect(fn)
+        return timer
 
     # ---- dialogs ----
 
     def _edit_tile_connections(self, element):
-        dlg = ElementConnectionsDialog(self.bus, element, self.elements(), self)
-        if dlg.exec():
-            dlg.apply()
+        """Edit one tile's cross-filter links in the inspector, live.
+
+        Each ticked edge wires immediately so the dashboard previews the
+        cross-filter; Cancel restores the page's connection graph snapshot.
+        """
+        page = self.current_page()
+        pid = page.id if page else None
+        snapshot = self.bus.connections_to_dict(pid)
+        form = ConnectionsForm(self.bus, element, self.elements(), live=True)
+
+        def cancel():
+            self.bus.load_connections(snapshot, pid)
+            self.bus.filtersChanged.emit()   # targets recompute their filter
+
+        self._inspector.open_editor(
+            "Connections — {}".format(element.display_name()),
+            form, on_commit=None, on_cancel=cancel, subject=element)
 
     def open_settings(self):
-        # Export now lives on the tab strip, not in Settings. Settings holds
-        # the global controls (Appearance, element corner radius, About).
-        dlg = SettingsDialog(self.open_appearance, self,
+        # Export now lives on the tab strip, not in Settings. Settings holds the
+        # global controls: the *Themes* editor (canvas colors + fonts) embedded
+        # inline, and the *Layout* page (corner radius, element spacing, text
+        # sizes) — all applied live via the callbacks below.
+        dlg = SettingsDialog(self, theme=self.bus.theme,
+                             on_appearance=self._apply_global_theme,
                              on_radius=self._set_global_radius,
                              on_gap=self._set_global_gap,
-                             gap=self.canvas_gap())
+                             on_size=self._set_global_text_size,
+                             on_canvas_size=self._set_canvas_size,
+                             gap=self.canvas_gap(),
+                             canvas_size=self.canvas_size())
         dlg.exec()
+
+    def _apply_global_theme(self, theme):
+        """Apply a theme from the *Themes* editor (canvas colors + fonts).
+
+        The editor rebuilds its Theme from an open-time snapshot, so the
+        Layout-owned metrics (text sizes + corner radius) it carries may be
+        stale; preserve the *live* ones so editing a color never reverts a
+        size/radius the user just changed on the Layout page.
+        """
+        live = self.bus.theme
+        self.bus.set_theme(theme.with_values(
+            font_size=live.font_size, title_size=live.title_size,
+            value_size=live.value_size, radius=live.radius))
 
     def _set_global_radius(self, value):
         """Live-apply a new global corner radius to every dashboard element."""
         self.bus.set_theme(self.bus.theme.with_values(radius=int(value)))
 
+    def _set_global_text_size(self, key, value):
+        """Live-apply a text-size change (font_size/title_size/value_size)."""
+        if key in ("font_size", "title_size", "value_size"):
+            self.bus.set_theme(self.bus.theme.with_values(**{key: int(value)}))
+
     def _set_global_gap(self, value):
         """Live-apply a new global element gap (spacing) to every page."""
         self._apply_gap_to_all(int(value))
+
+    def _set_canvas_size(self, w, h):
+        """Live-apply a new global export/print region to every page.
+
+        Resizes every page's region and reframes the current view so the user
+        immediately sees the new page outline fit to the viewport.
+        """
+        for page in self._pages:
+            page.canvas.set_region(int(w), int(h))
+        view = self.current_view()
+        if view is not None:
+            view.reset_zoom()                  # reframe + re-sync the current one
 
     def export_to_html(self):
         from .export_dialog import prompt_and_export
@@ -716,15 +837,6 @@ class DashboardWindow(QMainWindow):
         from .export.raster_export import export_pdf
         export_pdf(self, self)
 
-    def open_appearance(self):
-        original = self.bus.theme
-        dlg = AppearanceDialog(original, mode="global",
-                               on_apply=self.bus.set_theme, parent=self)
-        if dlg.exec():
-            self.bus.set_theme(dlg.result_theme())
-        else:
-            self.bus.set_theme(original)   # revert live preview
-
     # ---- lifecycle ----
 
     def _ensure_bubble(self):
@@ -735,6 +847,16 @@ class DashboardWindow(QMainWindow):
             self._bubble = MinimizedBubble(self.iface.mainWindow())
             self._bubble.restoreRequested.connect(self.restore_from_bubble)
         return self._bubble
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # keep the overlay inspector pinned to the right edge of the canvas
+        if getattr(self, "_inspector", None) is not None:
+            self._inspector.reposition()
+        # and the Add-element picker flush against the rail (while open)
+        if getattr(self, "_element_picker", None) is not None \
+                and self._element_picker.isVisible():
+            self._element_picker.reposition(self.sidebar)
 
     def changeEvent(self, event):
         super().changeEvent(event)
@@ -781,12 +903,14 @@ class DashboardWindow(QMainWindow):
         super().closeEvent(event)
 
     def clear_all(self):
+        # discard any open editor before its subject tiles are destroyed
+        if getattr(self, "_inspector", None) is not None:
+            self._inspector.close_active(commit=False)
         for page in self._pages:
             page.canvas.clear()
             self._stack.removeWidget(page.view)
             page.view.deleteLater()
         self._pages = []
-        self._global_header = None
         while self._tab_bar.count():
             self._tab_bar.removeTab(0)
         self._update_tabbar_visibility()
@@ -814,22 +938,49 @@ class DashboardWindow(QMainWindow):
                 "connections": self.bus.connections_to_dict(page.id),
                 "elements": elements,
             }
-            if page.header_config:
-                page_data["header"] = page.header_config
             pages.append(page_data)
         cur = self.current_page()
+        cw, ch = self.canvas_size()
         data = {
             "version": 3,
             "grid": {"cols": self.canvas_cols(), "rows": self.canvas_rows()},
             "gap": self.canvas_gap(),
+            "canvas": {"w": cw, "h": ch},
             "theme": self.bus.theme.to_dict(),
             "window": {"w": self.width(), "h": self.height()},
+            "locked": bool(self._editing_locked),
             "active_page": cur.id if cur else None,
             "pages": pages,
         }
-        if self._global_header:
-            data["header"] = self._global_header
         return data
+
+    @staticmethod
+    def _resolve_canvas_size(data):
+        """The export/print region for a layout dict.
+
+        Uses the stored ``canvas`` when present; otherwise (older blobs with no
+        region) derives it from the content bounding box across all pages so the
+        export keeps its previous extent, rounded up to a tidy step. Falls back
+        to the default when the dashboard has no tiles.
+        """
+        cv = data.get("canvas")
+        if isinstance(cv, dict) and cv.get("w") and cv.get("h"):
+            return (int(cv["w"]), int(cv["h"]))
+        max_r = max_b = 0
+        for p in data.get("pages", []):
+            for cfg in p.get("elements", []):
+                g = cfg.get("grid")
+                if isinstance(g, dict) and all(k in g for k in ("x", "y", "w", "h")):
+                    max_r = max(max_r, g["x"] + g["w"])
+                    max_b = max(max_b, g["y"] + g["h"])
+        if max_r <= 0 or max_b <= 0:
+            return (DEFAULT_CANVAS_W, DEFAULT_CANVAS_H)
+
+        def round_up(v):
+            step = CANVAS_SIZE_STEP
+            return ((int(v) + CANVAS_MARGIN + step - 1) // step) * step
+
+        return (round_up(max_r), round_up(max_b))
 
     def _apply_layout_dict(self, data):
         """Rebuild the whole dashboard from a migrated v3 layout dict.
@@ -841,17 +992,21 @@ class DashboardWindow(QMainWindow):
         self.clear_all()
         self.bus.set_theme(Theme.from_dict(data.get("theme")))
         self._apply_window_style()
-        self._global_header = data.get("header") or None
         grid = data.get("grid", {})
         cols = grid.get("cols", DEFAULT_COLS)
         rows = grid.get("rows", DEFAULT_ROWS)
         gap = int(data.get("gap", DEFAULT_GAP))
+        region_w, region_h = self._resolve_canvas_size(data)
+        # legacy docked headers (top-level global + per-page) become header
+        # tiles in each page; the region grows uniformly to include the band
+        src_pages, region_w, region_h = materialize_header_tiles(
+            data["pages"], data.get("header"), region_w, region_h)
 
-        for p in data["pages"]:
+        for p in src_pages:
             page = self.add_page(p["title"], page_id=p["id"], make_active=False)
-            page.header_config = p.get("header") or None
             page.canvas.set_grid(cols, rows)
             page.canvas.set_gap(gap)
+            page.canvas.set_region(region_w, region_h)
             self.bus.load_connections(p.get("connections", {}), p["id"])
             for cfg in p.get("elements", []):
                 cfg = dict(cfg)
@@ -866,8 +1021,6 @@ class DashboardWindow(QMainWindow):
                 if t:
                     self._add_element_to(page, t, cfg, rect)
 
-        self._refresh_all_headers()
-
         active = data.get("active_page")
         idx = next((i for i, pg in enumerate(self._pages)
                     if pg.id == active), 0)
@@ -876,6 +1029,13 @@ class DashboardWindow(QMainWindow):
         win = data.get("window", {})
         if win.get("w") and win.get("h"):
             self.resize(int(win["w"]), int(win["h"]))
+
+        # restore Build/Use mode (and sync the toggle); fans out to every tile
+        # and header so contents become interactive iff the dashboard was saved
+        # locked (or, for older blobs, defaults to Use mode when it has tiles).
+        self._set_editing_locked(bool(data.get("locked")), update_button=True)
+
+        self._schedule_reframe()   # fit the loaded page to the viewport
 
     # ---- persistence into the .qgz project ----
 

@@ -1,27 +1,26 @@
 # -*- coding: utf-8 -*-
 """Header (brand banner) element.
 
-A presentational banner — no data binding, no cross-filtering — that docks to
-one edge of a page (top / bottom / left / right) *outside* the tile grid and
-acts as the dashboard's brand chrome. It carries a styled title (custom font
-family / size / alignment chosen from the installed QGIS/Qt fonts) and a single
-logo image in an anchored slot (left / right / above / below the title).
+A presentational banner — no data binding, no cross-filtering — that acts as
+the dashboard's brand chrome. It carries a styled title (custom font family /
+size / alignment chosen from the installed QGIS/Qt fonts) and a single logo
+image in an anchored slot (left / right / above / below the title).
 
-It is **not** wrapped in a :class:`~dashboard_canvas.GridTile` like ordinary
-tiles — the :class:`~page_view.PageView` hosts it directly on a page edge — so
-it carries its own edit affordances: double-click or right-click to configure
-or remove (``configureRequested`` / ``removeRequested``). Scope (per-page vs.
-shown on every page) is tracked by the window, not stored on this element.
+It **is** wrapped in a :class:`~dashboard_canvas.GridTile` like every other
+tile — the canvas hosts it free-form (drag / resize / snap) and the tile
+provides the move/resize/menu chrome and the Build/Use lock — so this element
+only renders its title + logo. ``anchor``/``thickness`` are no longer used (a
+tile has free geometry).
 
 ``config`` keys: ``title``, ``font_family``, ``font_size``, ``align``,
-``logo_path``, ``logo_slot``, ``logo_size``, ``anchor``, ``thickness``.
+``logo_path``, ``logo_slot``, ``logo_size``.
 """
 
 import os
 
-from qgis.PyQt.QtCore import Qt, pyqtSignal
+from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtGui import QPixmap, QImage, QPainter
-from qgis.PyQt.QtWidgets import QLabel, QBoxLayout, QMenu
+from qgis.PyQt.QtWidgets import QLabel, QBoxLayout
 
 from .base import DashboardElement
 from .header_layout import inner_box_direction
@@ -50,9 +49,6 @@ class HeaderElement(DashboardElement):
     type_name = "header"
     is_filter_source = False
     accepts_filter = False
-
-    configureRequested = pyqtSignal(object)   # emits self
-    removeRequested = pyqtSignal(object)       # emits self
 
     def __init__(self, bus, config=None, parent=None):
         super().__init__(bus, config, parent)
@@ -137,17 +133,3 @@ class HeaderElement(DashboardElement):
         return pm.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
                          Qt.TransformationMode.SmoothTransformation)
 
-    # ---- editing affordances (not a GridTile, so it owns these) ----
-
-    def contextMenuEvent(self, event):
-        menu = QMenu(self)
-        menu.addAction("Configure…").triggered.connect(
-            lambda: self.configureRequested.emit(self))
-        menu.addSeparator()
-        menu.addAction("Remove").triggered.connect(
-            lambda: self.removeRequested.emit(self))
-        menu.exec(event.globalPos())
-
-    def mouseDoubleClickEvent(self, event):
-        self.configureRequested.emit(self)
-        super().mouseDoubleClickEvent(event)

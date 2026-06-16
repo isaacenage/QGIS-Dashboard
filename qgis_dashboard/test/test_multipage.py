@@ -278,8 +278,9 @@ class AddElementDialogTest(unittest.TestCase):
 
 class ZoomTest(unittest.TestCase):
     def test_clamp_zoom_bounds(self):
-        self.assertEqual(clamp_zoom(0.1), 0.5)
-        self.assertEqual(clamp_zoom(9.0), 3.0)
+        # the range widened (0.1–4.0) so Reset Zoom can fit any page size
+        self.assertEqual(clamp_zoom(0.01), 0.1)
+        self.assertEqual(clamp_zoom(9.0), 4.0)
         self.assertAlmostEqual(clamp_zoom(1.25), 1.25)
 
     def test_pageview_default_zoom_is_one(self):
@@ -289,7 +290,7 @@ class ZoomTest(unittest.TestCase):
     def test_pageview_set_zoom_clamps(self):
         view = PageView(DashboardCanvas(None, 12, 8))
         view.set_zoom(10.0)
-        self.assertEqual(view.zoom(), 3.0)
+        self.assertEqual(view.zoom(), 4.0)
 
 
 class MigrateLayoutTest(unittest.TestCase):
@@ -348,6 +349,36 @@ class MigrateLayoutTest(unittest.TestCase):
     def test_gap_passes_through(self):
         data = migrate_layout({"version": 3, "gap": 16, "pages": []})
         self.assertEqual(data["gap"], 16)
+
+    def test_canvas_region_absent_in_older_blobs(self):
+        data = migrate_layout([{"__type__": "indicator", "id": "a"}])
+        self.assertIsNone(data["canvas"])
+
+    def test_canvas_region_passes_through(self):
+        data = migrate_layout(
+            {"version": 3, "canvas": {"w": 1600, "h": 900}, "pages": []})
+        self.assertEqual(data["canvas"], {"w": 1600, "h": 900})
+
+    def test_resolve_canvas_size_uses_stored_region(self):
+        size = DashboardWindow._resolve_canvas_size(
+            {"canvas": {"w": 1600, "h": 900}, "pages": []})
+        self.assertEqual(size, (1600, 900))
+
+    def test_resolve_canvas_size_derives_from_content_when_absent(self):
+        # legacy blob with no region: derive from the content bounding box
+        # (rounded up) so the export keeps its previous extent
+        data = {"pages": [{"elements": [
+            {"grid": {"x": 0, "y": 0, "w": 300, "h": 200}},
+            {"grid": {"x": 320, "y": 0, "w": 300, "h": 200}},
+        ]}]}
+        w, h = DashboardWindow._resolve_canvas_size(data)
+        self.assertGreaterEqual(w, 620)   # past the right-most tile edge
+        self.assertGreaterEqual(h, 200)
+
+    def test_resolve_canvas_size_defaults_when_no_tiles(self):
+        from window import DEFAULT_CANVAS_W, DEFAULT_CANVAS_H
+        size = DashboardWindow._resolve_canvas_size({"pages": []})
+        self.assertEqual(size, (DEFAULT_CANVAS_W, DEFAULT_CANVAS_H))
 
 
 class MultiPageWindowTest(unittest.TestCase):
@@ -409,6 +440,16 @@ class StartScreenAndFileTest(unittest.TestCase):
         data = win._build_layout_dict()
         win._apply_layout_dict(migrate_layout(data))
         self.assertEqual(len(win.current_canvas().tiles()), 1)
+
+    def test_canvas_size_round_trips(self):
+        win = self._win()
+        win._set_canvas_size(1600, 900)
+        self.assertEqual(win.canvas_size(), (1600, 900))
+        data = win._build_layout_dict()
+        self.assertEqual(data["canvas"], {"w": 1600, "h": 900})
+        other = self._win()
+        other._apply_layout_dict(migrate_layout(data))
+        self.assertEqual(other.canvas_size(), (1600, 900))
 
     def test_save_and_open_qdash_file(self):
         win = self._win()
@@ -478,6 +519,7 @@ class HeaderElementTest(unittest.TestCase):
         self.assertEqual(el._title.text(), "Acme Corp")
 
 
+
 class AddElementHeaderDialogTest(unittest.TestCase):
     def _select(self, dlg, type_name):
         i = dlg.type_combo.findData(type_name)
@@ -489,13 +531,14 @@ class AddElementHeaderDialogTest(unittest.TestCase):
         self._select(dlg, "header")
         self.assertTrue(dlg.layer_combo.isHidden())
         dlg.title_edit.setText("Brand")
-        dlg._dyn["scope_all_pages"].setChecked(True)
         t, cfg = dlg.result_config()
         self.assertEqual(t, "header")
         self.assertEqual(cfg["title"], "Brand")
-        self.assertTrue(cfg["scope_all_pages"])
-        self.assertIn("anchor", cfg)
         self.assertIn("font_family", cfg)
+        # the header is a free-placed tile now — no dock/scope keys
+        self.assertNotIn("anchor", cfg)
+        self.assertNotIn("thickness", cfg)
+        self.assertNotIn("scope_all_pages", cfg)
         self.assertNotIn("layer_id", cfg)
 
 
@@ -503,32 +546,18 @@ class WindowHeaderTest(unittest.TestCase):
     def _win(self):
         return DashboardWindow(IFACE)
 
-    def test_per_page_header_only_on_that_page(self):
+    def test_header_added_as_tile_on_current_page(self):
         win = self._win()
         win.add_page("Second")
         # current page is the second one
-        win.add_element("header", {"title": "Local", "scope_all_pages": False})
+        win.add_element("header", {"title": "Local"})
         cur = win.current_page()
-        self.assertEqual(cur.header_config["title"], "Local")
-        self.assertIsNone(win.pages()[0].header_config)
-        self.assertIsNotNone(cur.view.header())
-        self.assertIsNone(win.pages()[0].view.header())
-
-    def test_global_header_resolves_on_all_pages(self):
-        win = self._win()
-        win.add_page("Second")
-        win.add_element("header", {"title": "Brand", "scope_all_pages": True})
-        for page in win.pages():
-            self.assertEqual(win.header_for_page(page)["title"], "Brand")
-            self.assertIsNotNone(page.view.header())
-
-    def test_page_header_overrides_global(self):
-        win = self._win()
-        first = win.pages()[0]
-        win.add_element("header", {"title": "Brand", "scope_all_pages": True})
-        first.header_config = {"title": "Local"}
-        win._refresh_all_headers()
-        self.assertEqual(win.header_for_page(first)["title"], "Local")
+        cur_types = [t.element.type_name for t in cur.canvas.tiles()]
+        self.assertIn("header", cur_types)
+        # the header is per-page now (no global scope): the other page is clean
+        other = win.pages()[0]
+        other_types = [t.element.type_name for t in other.canvas.tiles()]
+        self.assertNotIn("header", other_types)
 
 
 class ThemeChromeTest(unittest.TestCase):

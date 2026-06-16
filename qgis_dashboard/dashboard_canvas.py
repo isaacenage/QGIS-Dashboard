@@ -31,6 +31,7 @@ DEFAULT_W = 320      # px default new-tile size (logical)
 DEFAULT_H = 240
 MAP_W = 480          # px default size for the (larger) map tile
 MAP_H = 380
+HEADER_BAND_H = 80   # px default height for a new header tile (spans region width)
 # the export/print region (the "page") in logical px; the canvas draws a hairline
 # frame around it, Reset Zoom fits it, and PNG/PDF export render exactly this rect
 DEFAULT_REGION_W = 1280
@@ -197,7 +198,13 @@ class GridTile(QFrame):
         self._active = False   # a move/resize gesture is in progress
 
     def contextMenuEvent(self, event):
-        """Right-click a tile to configure / wire / restyle / remove it."""
+        """Right-click a tile to configure / wire / restyle / remove it.
+
+        Build-only: in Use mode (locked) the configuration menu is suppressed so
+        the tile is purely interactive. Unlock to edit.
+        """
+        if self._locked:
+            return
         menu = QMenu(self)
         menu.addAction("Configure").triggered.connect(
             lambda: self.configureRequested.emit(self.element))
@@ -230,28 +237,35 @@ class GridTile(QFrame):
         """Show/hide the editing chrome (drag strip, buttons, resize handles).
 
         Hidden while the canvas is grabbed for a PNG/PDF export so the saved
-        image shows only the clean tiles, not the editing affordances. When
-        restoring, the move/resize affordances only reappear if the layout is
-        not locked.
+        image shows only the clean tiles, not the editing affordances. The whole
+        editing chrome (drag strip, ⚙/✕ buttons, resize handles) only reappears
+        when the layout is not locked (Build mode).
         """
-        self.close_btn.setVisible(on)
-        self.style_btn.setVisible(on)
-        interactive = on and not self._locked
-        self.header.setVisible(interactive)
+        editing = on and not self._locked
+        self.close_btn.setVisible(editing)
+        self.style_btn.setVisible(editing)
+        self.header.setVisible(editing)
         for h in self._handles.values():
-            h.setVisible(interactive)
+            h.setVisible(editing)
 
     def set_locked(self, locked):
-        """Lock/unlock this tile's layout: hide the drag strip + resize handles.
+        """Switch the tile between Build (unlocked) and Use (locked) modes.
 
-        Locking only affects moving/resizing — the tile still renders and its
-        element stays interactive (e.g. clicking a chart to cross-filter).
+        **Build mode** (unlocked): the drag strip, resize handles and ⚙/✕
+        buttons are shown so the tile can be moved/resized/configured, and the
+        element's contents are inert. **Use mode** (locked): that editing chrome
+        is hidden, the tile is fixed, and the element's contents become
+        interactive (chart click → filter, map pan/identify, …).
         """
         self._locked = bool(locked)
-        interactive = not self._locked
-        self.header.setVisible(interactive)
+        editing = not self._locked
+        self.header.setVisible(editing)
+        self.close_btn.setVisible(editing)
+        self.style_btn.setVisible(editing)
         for h in self._handles.values():
-            h.setVisible(interactive)
+            h.setVisible(editing)
+        # contents interact only in Use mode
+        self.element.set_interactive(self._locked)
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
@@ -648,8 +662,12 @@ class DashboardCanvas(QWidget):
 
     def add_tile(self, element, pixel_rect=None):
         if pixel_rect is None:
-            if getattr(element, "type_name", "") == "map":
+            tname = getattr(element, "type_name", "")
+            if tname == "map":
                 pixel_rect = self.first_free(MAP_W, MAP_H)
+            elif tname == "header":
+                # a banner-shaped default: spans the region width, short height
+                pixel_rect = self.first_free(self.region_w, HEADER_BAND_H)
             else:
                 pixel_rect = self.first_free(DEFAULT_W, DEFAULT_H)
         tile = GridTile(self, element, pixel_rect)

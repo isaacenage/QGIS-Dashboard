@@ -1,21 +1,30 @@
 # -*- coding: utf-8 -*-
-"""Add-element dialog.
+"""Add / configure element form.
 
 Minimal config UI per element type. Uses QgsMapLayerComboBox /
 QgsFieldComboBox where it helps. This is the MVP stand-in for ArcGIS's rich
 configuration panels — enough to bind data and see the dashboard work.
+
+The controls live in :class:`ElementConfigForm` (a plain ``QWidget``) so the
+same form can be **embedded** in the right-edge inspector panel (it emits
+:attr:`~ElementConfigForm.changed` on every edit so the host can preview live).
+:class:`AddElementDialog` is a thin modal wrapper kept for standalone use and
+tests; it re-exposes the form's public attributes (``type_combo``,
+``layer_combo``, ``_dyn``, ``result_config``, ``managed_keys``).
 """
 
 from qgis.PyQt.QtWidgets import (
     QDialog, QFormLayout, QComboBox, QLineEdit, QDialogButtonBox, QCheckBox,
-    QPlainTextEdit, QWidget, QHBoxLayout, QPushButton, QFileDialog, QSpinBox,
-    QFontComboBox,
+    QPlainTextEdit, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog,
+    QSpinBox, QFontComboBox, QScrollArea,
 )
+from qgis.PyQt.QtCore import pyqtSignal
 from qgis.PyQt.QtGui import QFont
 from qgis.gui import QgsMapLayerComboBox, QgsFieldComboBox
 from qgis.core import QgsMapLayerProxyModel
 from .elements import ELEMENT_LABELS
 from .elements.chart_specs import CHART_SPECS, CHART_TYPE_ORDER
+from .form_util import compact_form, no_horizontal_scroll, shrink_combo
 
 # element types that bind to no vector layer (the Layer row is hidden for them)
 _LAYERLESS_TYPES = ("text", "image", "header")
@@ -27,11 +36,14 @@ _IMAGE_FILTER = ("Images (*.png *.jpg *.jpeg *.svg *.gif *.bmp *.webp);;"
 class _PathPicker(QWidget):
     """A read/write path field with a 'Browse…' button (image file chooser)."""
 
+    changed = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
         self._edit = QLineEdit()
+        self._edit.textChanged.connect(self.changed)
         browse = QPushButton("Browse…")
         browse.setProperty("variant", "secondary")
         browse.clicked.connect(self._browse)
@@ -51,42 +63,52 @@ class _PathPicker(QWidget):
         self._edit.setText(value or "")
 
 
-class AddElementDialog(QDialog):
-    """Add a new element, or — when *element* is given — reconfigure one.
+class ElementConfigForm(QWidget):
+    """Embeddable per-type config form.
 
-    In **configure** mode the element type is locked and every row is prefilled
-    from the existing ``config`` so the same per-type form re-edits a live tile
-    (opened from the tile's ``Configure…`` menu).
+    When *element* is given it is in **configure** mode: the element type is
+    locked and every row is prefilled from the existing ``config`` so the same
+    per-type form re-edits a live tile.
     """
+
+    changed = pyqtSignal()
 
     def __init__(self, parent=None, element=None):
         super().__init__(parent)
         self._element = element
-        self.setWindowTitle("Configure element" if element else
-                            "Add dashboard element")
-        self.form = QFormLayout(self)
+        # the rows live in a scroll area so a tall config (e.g. indicator)
+        # scrolls instead of clipping inside the fixed-height inspector panel
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        no_horizontal_scroll(scroll)
+        inner = QWidget()
+        self.form = QFormLayout(inner)
+        compact_form(self.form)
+        scroll.setWidget(inner)
+        root.addWidget(scroll, 1)
 
         self.type_combo = QComboBox()
+        shrink_combo(self.type_combo)
         for key, label in ELEMENT_LABELS.items():
             self.type_combo.addItem(label, key)
-        self.type_combo.currentIndexChanged.connect(self._rebuild)
+        self.type_combo.currentIndexChanged.connect(self._on_type_changed)
         self.form.addRow("Element type", self.type_combo)
 
         self.title_edit = QLineEdit()
+        self.title_edit.textChanged.connect(self.changed)
         self.form.addRow("Title", self.title_edit)
 
         self.layer_combo = QgsMapLayerComboBox()
+        shrink_combo(self.layer_combo)
         self.layer_combo.setFilters(QgsMapLayerProxyModel.VectorLayer)
         self.layer_combo.layerChanged.connect(self._on_layer)
         self.form.addRow("Layer", self.layer_combo)
 
         # dynamic rows live in this dict so we can clear them on type change
         self._dyn = {}
-
-        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        self.buttons.accepted.connect(self.accept)
-        self.buttons.rejected.connect(self.reject)
-        self.form.addRow(self.buttons)
 
         if element is not None:
             idx = self.type_combo.findData(element.type_name)
@@ -117,9 +139,32 @@ class AddElementDialog(QDialog):
         self._dyn = {}
 
     def _add_dyn(self, key, label, widget):
+        # combos (incl. field/font pickers) would otherwise size to their
+        # widest entry and overrun the narrow inspector panel — let them elide.
+        if isinstance(widget, QComboBox):
+            shrink_combo(widget)
         self._dyn[key] = widget
-        # insert before the button row
-        self.form.insertRow(self.form.rowCount() - 1, label, widget)
+        self.form.addRow(label, widget)
+        self._wire(widget)
+
+    def _wire(self, widget):
+        """Connect a dynamic control's change signal to :attr:`changed`."""
+        if isinstance(widget, _PathPicker):
+            widget.changed.connect(self.changed)
+        elif isinstance(widget, QgsFieldComboBox):
+            widget.fieldChanged.connect(lambda *_: self.changed.emit())
+        elif isinstance(widget, QFontComboBox):
+            widget.currentFontChanged.connect(lambda *_: self.changed.emit())
+        elif isinstance(widget, QComboBox):
+            widget.currentIndexChanged.connect(lambda *_: self.changed.emit())
+        elif isinstance(widget, QCheckBox):
+            widget.toggled.connect(lambda *_: self.changed.emit())
+        elif isinstance(widget, QSpinBox):
+            widget.valueChanged.connect(lambda *_: self.changed.emit())
+        elif isinstance(widget, QPlainTextEdit):
+            widget.textChanged.connect(self.changed)
+        elif isinstance(widget, QLineEdit):
+            widget.textChanged.connect(lambda *_: self.changed.emit())
 
     def _field_combo(self, allow_empty=False):
         c = QgsFieldComboBox()
@@ -133,6 +178,10 @@ class AddElementDialog(QDialog):
         self.layer_combo.setVisible(visible)
         if lbl:
             lbl.setVisible(visible)
+
+    def _on_type_changed(self):
+        self._rebuild()
+        self.changed.emit()
 
     def _rebuild(self):
         self._clear_dynamic()
@@ -170,15 +219,6 @@ class AddElementDialog(QDialog):
             slot.addItem("Below title", "below")
             self._add_dyn("logo_slot", "Logo position", slot)
             self._add_dyn("logo_size", "Logo size (px)", self._spin(12, 400, 40))
-            anchor = QComboBox()
-            anchor.addItem("Top", "top")
-            anchor.addItem("Bottom", "bottom")
-            anchor.addItem("Left", "left")
-            anchor.addItem("Right", "right")
-            self._add_dyn("anchor", "Dock edge", anchor)
-            self._add_dyn("thickness", "Banner thickness (px)",
-                          self._spin(40, 600, 80))
-            self._add_dyn("scope_all_pages", "Show on all pages", QCheckBox())
         elif t == "indicator":
             self._add_dyn("value_expression", "Value expression",
                           QLineEdit("count(1)"))
@@ -241,6 +281,7 @@ class AddElementDialog(QDialog):
         for w in self._dyn.values():
             if isinstance(w, QgsFieldComboBox):
                 w.setLayer(self.layer_combo.currentLayer())
+        self.changed.emit()
 
     def _load_values(self, config):
         """Prefill the dynamic rows from an existing element's config."""
@@ -276,7 +317,7 @@ class AddElementDialog(QDialog):
                     w.setText("" if val is None else str(val))
 
     def managed_keys(self):
-        """Config keys this dialog owns — so a configure-edit can drop the ones
+        """Config keys this form owns — so a configure-edit can drop the ones
         the user cleared (an absent key removes, rather than keeps, the old)."""
         keys = set(self._dyn.keys())
         keys.update({"title", "layer_id"})
@@ -311,3 +352,38 @@ class AddElementDialog(QDialog):
                     cfg[key] = ([s.strip() for s in val.split(",")]
                                 if key == "display_fields" else val)
         return t, cfg
+
+
+class AddElementDialog(QDialog):
+    """Modal wrapper around :class:`ElementConfigForm` (standalone / tests)."""
+
+    def __init__(self, parent=None, element=None):
+        super().__init__(parent)
+        self.setWindowTitle("Configure element" if element else
+                            "Add dashboard element")
+        root = QVBoxLayout(self)
+        self._form = ElementConfigForm(parent=self, element=element)
+        root.addWidget(self._form, 1)
+
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
+                                        | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        root.addWidget(self.buttons)
+
+        # re-expose the form's public surface so existing call sites / tests
+        # (which reach in for these attributes) keep working unchanged.
+        self.type_combo = self._form.type_combo
+        self.title_edit = self._form.title_edit
+        self.layer_combo = self._form.layer_combo
+
+    @property
+    def _dyn(self):
+        # the form rebinds its dict on every type change, so always defer to it
+        return self._form._dyn
+
+    def managed_keys(self):
+        return self._form.managed_keys()
+
+    def result_config(self):
+        return self._form.result_config()

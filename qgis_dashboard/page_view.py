@@ -1,32 +1,22 @@
 # -*- coding: utf-8 -*-
-"""PageView — a page surface: an optional docked header banner around a
-scroll-area-wrapped DashboardCanvas (which owns the page's zoom/pan).
+"""PageView — a page surface: a scroll-area-wrapped DashboardCanvas that owns
+the page's zoom/pan.
 
-``PageView`` used to *be* the scroll area. It is now a thin container so it can
-host a :class:`~elements.header.HeaderElement` banner docked on one edge of the
-page (top / bottom / left / right) *outside* the scrolling canvas, with the
-canvas filling the rest. The scroll/zoom/pan behavior lives unchanged in the
-private :class:`_CanvasScroll`; ``PageView`` keeps the original public API
-(``canvas``, ``zoom``/``set_zoom``/``zoom_in``/``zoom_out``/``reset_zoom``) by
-delegating to it, and adds :meth:`set_header`.
-
-The banner is outside the scroll area, so it stays fixed while the grid
-zooms/pans — correct behavior for brand chrome. Zoom is view-only, never
-persisted.
+``PageView`` is a thin container around a private :class:`_CanvasScroll` (a
+``QScrollArea`` wrapping one :class:`~dashboard_canvas.DashboardCanvas`). The
+canvas surface is the export/print region scaled by zoom; the scroll area is
+centred so a page smaller than the viewport sits framed and overflows to
+scrollbars (or middle-mouse drag) when zoomed in. Zoom is view-only, never
+persisted. The header is now an ordinary canvas tile, so this no longer docks a
+banner around the canvas.
 """
 
 from qgis.PyQt.QtCore import Qt, QPoint
-from qgis.PyQt.QtWidgets import QScrollArea, QWidget, QBoxLayout
+from qgis.PyQt.QtWidgets import QScrollArea, QWidget, QVBoxLayout
 
-from .elements.header_layout import box_direction
+from .zoom_fit import ZOOM_MIN, ZOOM_MAX, clamp_zoom, fit_zoom  # noqa: F401
 
-ZOOM_MIN = 0.5
-ZOOM_MAX = 3.0
 ZOOM_STEP = 1.2
-
-
-def clamp_zoom(z):
-    return max(ZOOM_MIN, min(float(z), ZOOM_MAX))
 
 
 class _CanvasScroll(QScrollArea):
@@ -39,10 +29,13 @@ class _CanvasScroll(QScrollArea):
         # (and only this one) — see Theme.window_qss.
         self.setObjectName("dashPageView")
         self.setWidget(canvas)
-        # The canvas manages its own size (content extent x zoom), so we never
-        # let the scroll area stretch it to the viewport.
+        # The canvas manages its own size (region/content extent x zoom), so we
+        # never let the scroll area stretch it to the viewport.
         self.setWidgetResizable(False)
         self.setFrameShape(QScrollArea.Shape.NoFrame)
+        # centre the page when it is smaller than the viewport (e.g. just after
+        # a fit-to-region Reset Zoom), so the framed region sits centred.
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._zoom = 1.0
         self._pan_origin = None
         self._pan_scroll = None
@@ -62,7 +55,16 @@ class _CanvasScroll(QScrollArea):
         return self.set_zoom(self._zoom / ZOOM_STEP)
 
     def reset_zoom(self):
-        return self.set_zoom(1.0)
+        """Fit the canvas's export/print region to the viewport.
+
+        Reset Zoom frames the whole page (the region) in the viewport, so the
+        user always lands on a view of the exact rectangle that will export.
+        """
+        region = self.canvas.region_size() if hasattr(self.canvas, "region_size") \
+            else (self.canvas.width(), self.canvas.height())
+        vp = self.viewport()
+        z = fit_zoom(region, (vp.width(), vp.height()))
+        return self.set_zoom(z)
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
@@ -100,17 +102,19 @@ class _CanvasScroll(QScrollArea):
 
 
 class PageView(QWidget):
-    """One page: an optional docked header banner around a scrolling canvas."""
+    """One page: a scrolling canvas with view-only zoom/pan."""
 
     def __init__(self, canvas, parent=None):
         super().__init__(parent)
         self.setObjectName("dashPageWrap")
+        # A custom QWidget subclass only paints a stylesheet background when this
+        # attribute is set — see #dashPageWrap in Theme.window_qss.
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._scroll = _CanvasScroll(canvas, self)
-        self._header = None
-        self._lay = QBoxLayout(QBoxLayout.Direction.TopToBottom, self)
-        self._lay.setContentsMargins(0, 0, 0, 0)
-        self._lay.setSpacing(0)
-        self._lay.addWidget(self._scroll, 1)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self._scroll, 1)
 
     # ---- zoom/pan delegation (preserves the original PageView API) ----
 
@@ -133,43 +137,9 @@ class PageView(QWidget):
     def reset_zoom(self):
         return self._scroll.reset_zoom()
 
-    # ---- docked header banner ----
+    # ---- static export (PNG / PDF) ----
 
-    def header(self):
-        return self._header
-
-    def set_header(self, element):
-        """Dock *element* (a HeaderElement) on the page edge from its config,
-        or remove the current banner when *element* is ``None``."""
-        if self._header is not None:
-            self._lay.removeWidget(self._header)
-            self._header.setParent(None)
-            self._header.deleteLater()
-            self._header = None
-        anchor = "top"
-        if element is not None:
-            cfg = getattr(element, "config", {}) or {}
-            anchor = cfg.get("anchor", "top")
-            thickness = int(cfg.get("thickness", 80) or 80)
-            element.setParent(self)
-            orient, _first = box_direction(anchor)
-            if orient == "v":
-                element.setFixedHeight(thickness)
-            else:
-                element.setFixedWidth(thickness)
-            self._header = element
-        self._relayout(anchor)
-
-    def _relayout(self, anchor):
-        lay = self._lay
-        lay.removeWidget(self._scroll)
-        if self._header is not None:
-            lay.removeWidget(self._header)
-        orient, banner_first = box_direction(anchor)
-        lay.setDirection(QBoxLayout.Direction.TopToBottom if orient == "v"
-                         else QBoxLayout.Direction.LeftToRight)
-        if self._header is not None and banner_first:
-            lay.addWidget(self._header, 0)
-        lay.addWidget(self._scroll, 1)
-        if self._header is not None and not banner_first:
-            lay.addWidget(self._header, 0)
+    def export_pixmap(self, scale=2.0):
+        """Render the page to a high-res pixmap. The header is now a canvas
+        tile, so this is exactly the canvas's region render."""
+        return self.canvas.export_pixmap(scale)

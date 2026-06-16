@@ -33,6 +33,13 @@ output a **single emailable file** that opens by double-click.
    stream from the network.
 5. **Points render as vector circle-markers** (no marker-image dependency).
 6. **Identify popup shows all fields** of the clicked feature.
+7. **No geometry simplification** — vertices kept at full fidelity. The only size
+   measure is coordinate-precision rounding to 6 decimals (~0.1 m; this is coordinate
+   precision, not vertex reduction).
+8. **Leaflet pinned to the latest stable release** (1.9.4 at time of writing; confirm the
+   newest stable at implementation).
+9. **Layer colors follow the exported theme** — each drawn layer cycles the theme's series
+   palette as it stands at export time.
 
 ## Core approach
 
@@ -56,9 +63,8 @@ duplicate the already-embedded attributes and desync from the index model.
   dict **reprojected to EPSG:4326**, or `None` (null/empty geometry or transform failure).
   - Reproject via `QgsCoordinateTransform(layer.crs(), QgsCoordinateReferenceSystem("EPSG:4326"), project)`.
   - Serialize with `QgsGeometry.asJson(precision=6)` then `json.loads` to a dict
-    (6 decimals ≈ 0.1 m; meaningfully smaller payload).
-  - Optional Douglas–Peucker `geom.simplify(tol)` for line/polygon layers above a vertex
-    budget; tolerance derived from extent. Points untouched.
+    (6 decimals ≈ 0.1 m; coordinate-precision rounding only — **no vertex simplification**,
+    full geometry fidelity is preserved).
   - Never raises: any per-feature failure yields `None` for that feature.
 
 **`export/data_collect.py`**
@@ -99,7 +105,8 @@ Bump `EXPORT_VERSION` 1 → 2.
 
 ### 4. Browser runtime (`export/assets/`)
 
-- **Vendor Leaflet**: new `assets/leaflet.js` + `assets/leaflet.css` (pinned version).
+- **Vendor Leaflet**: new `assets/leaflet.js` + `assets/leaflet.css` (latest stable,
+  1.9.4 at time of writing).
   `html_builder.load_assets()` reads them; `build_html` inlines `leaflet.css` into the
   `<style>` block **before** `runtime.css`, and `leaflet.js` into a `<script>` **before**
   `runtime.js` so `L` is defined when the runtime runs.
@@ -145,8 +152,9 @@ entries only if the claim doesn't hold.
 
 - **Map needs internet** for basemap tiles (accepted). Vectors still draw; `fallback_image`
   covers total Leaflet failure.
-- **File size** grows with geometry — mitigated by 4326 reprojection, 6-decimal precision,
-  optional simplification, and the extended size guard.
+- **File size** grows with geometry — mitigated by 4326 reprojection and 6-decimal
+  coordinate precision, plus the extended size guard. No vertex simplification, so dense
+  geometries stay large; the size guard is the backstop.
 - **XYZ detection is heuristic** — auth-token or unparseable basemaps fall back to OSM
   rather than failing the export.
 - **CRS edge cases** (antimeridian, un-transformable geometry) → that feature's geometry

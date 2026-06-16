@@ -155,10 +155,28 @@ table.dash-table tr.selected td { background: var(--brand-soft); }
 /* text + image + map */
 .dash-text { width: 100%; height: 100%; display: flex; padding: 4px; }
 .dash-text .inner { width: 100%; }
-.dash-image, .dash-map { width: 100%; height: 100%; object-fit: contain;
-  display: block; }
-.dash-map-wrap, .dash-image-wrap { width: 100%; height: 100%; display: flex;
+.dash-image { width: 100%; height: 100%; object-fit: contain; display: block; }
+.dash-image-wrap { width: 100%; height: 100%; display: flex;
   align-items: center; justify-content: center; overflow: hidden; }
+/* interactive Leaflet map fills the tile */
+.dash-map-wrap { width: 100%; height: 100%; position: relative; overflow: hidden; }
+.dash-map-wrap img.dash-map { width: 100%; height: 100%; object-fit: cover;
+  display: block; border-radius: var(--radius); }
+.dash-map-wrap .leaflet-container {
+  width: 100%; height: 100%;
+  border-radius: var(--radius);
+  font-family: var(--font-family);
+  background: var(--surface-bg);
+}
+/* identify popup — themed, hairline borders (never heavy outlines) */
+.dash-identify { font-family: var(--font-family); color: var(--text);
+  font-size: 12px; max-height: 180px; overflow: auto; }
+.dash-identify table { border-collapse: collapse; }
+.dash-identify th, .dash-identify td {
+  text-align: left; padding: 2px 10px 2px 0;
+  border-bottom: 1px solid var(--border); vertical-align: top; }
+.dash-identify th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+.leaflet-popup-content-wrapper { border-radius: var(--radius); }
 
 /* category selector */
 .dash-selector { display: flex; flex-direction: column; gap: 6px; }

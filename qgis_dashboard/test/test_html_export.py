@@ -19,6 +19,7 @@ from export.serialize import (
 )
 from export.theme_css import theme_to_css_vars
 from export.html_builder import build_html, embed_json
+from export.basemap import xyz_template_to_leaflet, OSM_BASEMAP
 
 
 class CleanConfigTest(unittest.TestCase):
@@ -187,6 +188,35 @@ class HtmlBuilderTest(unittest.TestCase):
         html = build_html(model, "", "", "", title="<evil>")
         self.assertIn("&lt;evil&gt;", html)
         self.assertNotIn("<title><evil>", html)
+
+
+class XyzTemplateTest(unittest.TestCase):
+    def test_osm_style_passthrough(self):
+        out = xyz_template_to_leaflet(
+            "https://tile.openstreetmap.org/{z}/{x}/{y}.png")
+        self.assertEqual(out["url_template"],
+                         "https://tile.openstreetmap.org/{z}/{x}/{y}.png")
+        self.assertFalse(out["tms"])
+
+    def test_url_encoded_tokens_are_decoded(self):
+        out = xyz_template_to_leaflet(
+            "https://a.tile/%7Bz%7D/%7Bx%7D/%7By%7D.png")
+        self.assertEqual(out["url_template"], "https://a.tile/{z}/{x}/{y}.png")
+
+    def test_tms_minus_y_flagged_and_normalized(self):
+        out = xyz_template_to_leaflet("https://a.tile/{z}/{x}/{-y}.png")
+        self.assertTrue(out["tms"])
+        self.assertIn("{y}", out["url_template"])
+        self.assertNotIn("{-y}", out["url_template"])
+
+    def test_garbage_returns_none(self):
+        self.assertIsNone(xyz_template_to_leaflet("not a url"))
+        self.assertIsNone(xyz_template_to_leaflet(""))
+        self.assertIsNone(xyz_template_to_leaflet(None))
+
+    def test_osm_fallback_constant_is_valid(self):
+        self.assertIn("{z}", OSM_BASEMAP["url_template"])
+        self.assertEqual(OSM_BASEMAP["tms"], False)
 
 
 if __name__ == "__main__":

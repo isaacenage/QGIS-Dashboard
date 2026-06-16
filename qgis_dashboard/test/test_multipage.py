@@ -5,14 +5,22 @@ __author__ = 'isaacenagework@gmail.com'
 __date__ = '2026-06-15'
 __copyright__ = 'Copyright 2026, Isaac Enage'
 
+import os
+import tempfile
 import unittest
 
 from utilities import get_qgis_app
 
+from qgis.core import QgsProject
+
 from dashboard_canvas import _proposed_resize, DashboardCanvas
 from bus import DashboardBus
 from page_view import clamp_zoom, PageView
-from window import migrate_layout, DashboardWindow, DEFAULT_COLS, DEFAULT_ROWS
+from window import (
+    migrate_layout, DashboardWindow, DEFAULT_COLS, DEFAULT_ROWS,
+    PROJECT_SCOPE, PROJECT_KEY,
+)
+import project_io
 from theme import Theme
 
 QGIS_APP, CANVAS, IFACE, PARENT = get_qgis_app()
@@ -375,6 +383,52 @@ class MultiPageWindowTest(unittest.TestCase):
         last = win.pages()[0]
         win.delete_page(last.id)
         self.assertEqual(len(win.pages()), 1)
+
+
+class StartScreenAndFileTest(unittest.TestCase):
+    """Start screen view-switching + .qdash save/open round-trip."""
+
+    def _win(self):
+        return DashboardWindow(IFACE)
+
+    def test_constructed_window_shows_dashboard(self):
+        win = self._win()
+        self.assertIs(win._content_stack.currentWidget(), win._pages_col)
+
+    def test_new_dashboard_resets_to_one_page(self):
+        win = self._win()
+        win.add_page("Second")
+        self.assertEqual(len(win.pages()), 2)
+        win.new_dashboard()
+        self.assertEqual(len(win.pages()), 1)
+        self.assertIs(win._content_stack.currentWidget(), win._pages_col)
+
+    def test_layout_dict_round_trip_restores_element(self):
+        win = self._win()
+        win.add_element("indicator", {"title": "Pop"})
+        data = win._build_layout_dict()
+        win._apply_layout_dict(migrate_layout(data))
+        self.assertEqual(len(win.current_canvas().tiles()), 1)
+
+    def test_save_and_open_qdash_file(self):
+        win = self._win()
+        win.add_element("indicator", {"title": "Pop"})
+        tmp = tempfile.mkdtemp()
+        path = project_io.write_layout_file(
+            os.path.join(tmp, "dash"), win._build_layout_dict())
+        self.assertTrue(path.endswith(project_io.QDASH_SUFFIX))
+        # a fresh window (empty Page 1, no tiles) opens it without a prompt
+        other = self._win()
+        other.open_file_path(path)
+        self.assertEqual(len(other.current_canvas().tiles()), 1)
+        self.assertIs(other._content_stack.currentWidget(), other._pages_col)
+
+    def test_load_from_project_without_dashboard_shows_start(self):
+        QgsProject.instance().removeEntry(PROJECT_SCOPE, PROJECT_KEY)
+        win = self._win()
+        win.load_from_project()
+        self.assertEqual(len(win.pages()), 0)
+        self.assertIs(win._content_stack.currentWidget(), win.start_view)
 
 
 class HeaderLayoutTest(unittest.TestCase):

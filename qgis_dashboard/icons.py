@@ -144,6 +144,20 @@ ICONS = {
         'v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83'
         'l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4'
         'h-.09a1.65 1.65 0 0 0-1.51 1z"/>'),
+    # save the dashboard to a .qdash file (floppy-disk outline)
+    "save": _stroke(
+        '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>'
+        '<polyline points="17 21 17 13 7 13 7 21"/>'
+        '<polyline points="7 3 7 8 15 8"/>'),
+    # return to the Start screen (house)
+    "home": _stroke(
+        '<path d="M3 11.5 12 4l9 7.5"/>'
+        '<path d="M5 10v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9"/>'
+        '<rect x="9.5" y="14" width="5" height="6"/>'),
+    # open a dashboard file (open folder)
+    "open": _stroke(
+        '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v1"/>'
+        '<path d="M3 8h17.5a1 1 0 0 1 .96 1.27l-2 7A2 2 0 0 1 17.5 18H5a2 2 0 0 1-2-2z"/>'),
     "zoom_out": _stroke(
         '<circle cx="11" cy="11" r="7"/>'
         '<line x1="20.5" y1="20.5" x2="16" y2="16"/>'

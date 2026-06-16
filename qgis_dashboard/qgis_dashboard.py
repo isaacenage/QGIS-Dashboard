@@ -156,6 +156,7 @@ class qgisdashboard:
     def _on_new(self):
         if self.window:
             self.window.clear_all()
+            self.window.show_start()
 
     def unload(self):
         """Removes the plugin menu item and icon from QGIS GUI."""

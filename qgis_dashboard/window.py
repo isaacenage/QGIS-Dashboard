@@ -16,17 +16,22 @@ blobs on load.
 """
 
 import json
+import os
 import uuid
 
 from qgis.PyQt.QtWidgets import (
     QMainWindow, QLabel, QWidget, QFrame, QHBoxLayout, QToolButton,
     QTabBar, QStackedWidget, QVBoxLayout, QMessageBox, QInputDialog, QMenu,
+    QFileDialog,
 )
 from qgis.PyQt.QtCore import Qt, QSize, pyqtSignal
 from qgis.core import QgsProject
 
 from .bus import DashboardBus
 from .theme import Theme
+from . import project_io
+from .recent_store import RecentStore
+from .start_view import StartView
 from .fonts import ensure_fonts_registered
 from .icons import logo_icon, monochrome_icon
 from .sidebar import Sidebar
@@ -154,13 +159,27 @@ class DashboardWindow(QMainWindow):
         col.setSpacing(0)
         col.addWidget(self._build_tab_strip())
         col.addWidget(self._stack, 1)
+        self._pages_col = pages_col
+
+        # content area: a stack swapping between the Start screen (recent-
+        # project cards) and the page canvas. The Start screen greets a project
+        # that has no dashboard yet; the Home rail button returns to it.
+        self._recent_store = RecentStore()
+        self.start_view = StartView(self.bus.theme, self)
+        self.start_view.continueRequested.connect(self.show_dashboard)
+        self.start_view.newRequested.connect(self.new_dashboard)
+        self.start_view.openFileRequested.connect(self.open_from_file)
+        self.start_view.openRecentRequested.connect(self.open_file_path)
+        self._content_stack = QStackedWidget()
+        self._content_stack.addWidget(self.start_view)   # index 0
+        self._content_stack.addWidget(pages_col)         # index 1
 
         container = QWidget()
         row = QHBoxLayout(container)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(0)
         row.addWidget(self.sidebar)
-        row.addWidget(pages_col, 1)
+        row.addWidget(self._content_stack, 1)
         self.setCentralWidget(container)
 
         self._tab_bar.currentChanged.connect(self._on_tab_changed)
@@ -172,7 +191,14 @@ class DashboardWindow(QMainWindow):
         self._build_status_bar()
         self._apply_window_style()
 
+        # A freshly-constructed window holds one default page and shows the
+        # canvas. The Start screen (recent-project cards) is driven by the
+        # project lifecycle: load_from_project() shows it for a .qgz with no
+        # dashboard, and the plugin shows it on New Project — so a brand-new
+        # project greets the user with the cards, while an existing dashboard
+        # opens straight to the canvas.
         self.add_page("Page 1")
+        self.show_dashboard()
 
         # keep config combos / map mirror fresh as project layers change
         QgsProject.instance().layersAdded.connect(
@@ -189,15 +215,20 @@ class DashboardWindow(QMainWindow):
         """Vertical icon rail replacing the old horizontal toolbar."""
         self.sidebar = Sidebar(self.bus.theme, self)
         self.sidebar.add_action(
+            "home", "Home — recent dashboards", self.show_start)
+        self.sidebar.add_action(
+            "save", "Save dashboard to a file", self.save_to_file)
+        self.sidebar.add_separator()
+        self.sidebar.add_action(
             "add_element", "Add element", self.add_element_dialog)
         self.sidebar.add_action(
             "add_page", "Add page", self._add_page_interactive)
         self.sidebar.add_separator()
+        self.sidebar.add_action("zoom_in", "Zoom in", self._zoom_in)
         self.sidebar.add_action(
             "zoom_out", "Zoom out", self._zoom_out)
         self.sidebar.add_action(
             "zoom_reset", "Reset zoom (100%)", self._zoom_reset)
-        self.sidebar.add_action("zoom_in", "Zoom in", self._zoom_in)
         self.sidebar.add_stretch()
         self.sidebar.add_action(
             "clear_filter", "Clear filter", self.bus.clear_all_filters)
@@ -297,6 +328,7 @@ class DashboardWindow(QMainWindow):
 
     def _on_theme_changed(self):
         self.sidebar.apply_theme(self.bus.theme)
+        self.start_view.apply_theme(self.bus.theme)
         self._apply_window_style()
         # re-tint the tab-strip buttons to the new theme
         muted = self.bus.theme.text_muted
@@ -309,6 +341,92 @@ class DashboardWindow(QMainWindow):
         self.filter_label.setText(
             "No active filter" if n == 0 else "Filters active: {}".format(n))
         self._filter_dot.setVisible(n > 0)
+
+    # ---- start screen / view switching ----
+
+    def show_start(self):
+        """Show the Start screen (recent-project cards) in the canvas area."""
+        self.start_view.set_can_continue(bool(self._pages))
+        self.start_view.set_recents(self._recent_store.load_recents())
+        self._content_stack.setCurrentWidget(self.start_view)
+
+    def show_dashboard(self):
+        """Show the page canvas, leaving the Start screen."""
+        if not self._pages:
+            return   # nothing to show yet — stay on the Start screen
+        self._content_stack.setCurrentWidget(self._pages_col)
+
+    def new_dashboard(self):
+        """Create a fresh, blank dashboard (one page) and show it."""
+        if not self._confirm_replace():
+            return
+        self.clear_all()
+        self.bus.set_theme(Theme.default())
+        self._apply_window_style()
+        self.add_page("Page 1")
+        self._apply_grid_to_all(DEFAULT_COLS, DEFAULT_ROWS)
+        self.show_dashboard()
+
+    # ---- standalone .qdash save / open ----
+
+    def save_to_file(self):
+        """Write the whole dashboard to a portable ``.qdash`` file."""
+        if not self._pages:
+            QMessageBox.information(
+                self, "Nothing to save",
+                "Create a dashboard first (New Dashboard), then save it.")
+            return
+        cur = self.current_page()
+        suggested = os.path.join(
+            self._recent_store.default_directory(),
+            project_io.ensure_suffix(cur.title if cur else "dashboard"))
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save dashboard", suggested, project_io.QDASH_FILTER)
+        if not path:
+            return
+        try:
+            final = project_io.write_layout_file(
+                path, self._build_layout_dict())
+        except OSError as exc:
+            QMessageBox.critical(
+                self, "Save failed",
+                "Could not save the dashboard:\n{}".format(exc))
+            return
+        self._recent_store.record(final, project_io.display_name(final))
+        self._recent_store.remember_dir(final)
+        self.statusBar().showMessage("Saved dashboard to {}".format(final), 5000)
+
+    def open_from_file(self):
+        """Pick a ``.qdash`` file from disk and open it."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open dashboard", self._recent_store.default_directory(),
+            project_io.QDASH_FILTER)
+        if path:
+            self.open_file_path(path)
+
+    def open_file_path(self, path):
+        """Load a ``.qdash`` file at *path* (used by recent cards too)."""
+        if not self._confirm_replace():
+            return
+        try:
+            data = migrate_layout(project_io.read_layout_file(path))
+        except (OSError, ValueError) as exc:
+            QMessageBox.critical(
+                self, "Open failed",
+                "Could not open this dashboard file:\n{}".format(exc))
+            return
+        self._apply_layout_dict(data)
+        self.show_dashboard()
+        self._recent_store.record(path, project_io.display_name(path))
+
+    def _confirm_replace(self):
+        """Confirm before discarding a dashboard that currently has tiles."""
+        if not any(p.canvas.tiles() for p in self._pages):
+            return True
+        ans = QMessageBox.question(
+            self, "Open dashboard",
+            "Opening a dashboard replaces the one currently loaded. Continue?")
+        return ans == QMessageBox.StandardButton.Yes
 
     # ---- pages ----
 
@@ -622,9 +740,14 @@ class DashboardWindow(QMainWindow):
         self._update_tabbar_visibility()
         self.bus.clear_all_filters()
 
-    # ---- persistence into the .qgz project ----
+    # ---- serialization (shared by .qgz embedding and .qdash files) ----
 
-    def save_to_project(self):
+    def _build_layout_dict(self):
+        """Serialize the whole dashboard to the v3 layout dict.
+
+        Used by both :meth:`save_to_project` (writes it into the ``.qgz``) and
+        :meth:`save_to_file` (writes it to a portable ``.qdash`` file).
+        """
         pages = []
         for page in self._pages:
             elements = []
@@ -654,24 +777,16 @@ class DashboardWindow(QMainWindow):
         }
         if self._global_header:
             data["header"] = self._global_header
-        QgsProject.instance().writeEntry(
-            PROJECT_SCOPE, PROJECT_KEY, json.dumps(data))
+        return data
 
-    def load_from_project(self):
-        raw, ok = QgsProject.instance().readEntry(
-            PROJECT_SCOPE, PROJECT_KEY, "")
+    def _apply_layout_dict(self, data):
+        """Rebuild the whole dashboard from a migrated v3 layout dict.
+
+        Self-contained: clears any current dashboard first, so it serves both
+        the ``.qgz`` load and opening a ``.qdash`` file (replacing the current
+        dashboard).
+        """
         self.clear_all()
-        if not ok or not raw:
-            self.bus.set_theme(Theme.default())
-            self.add_page("Page 1")
-            self._apply_grid_to_all(DEFAULT_COLS, DEFAULT_ROWS)
-            return
-        try:
-            data = migrate_layout(json.loads(raw))
-        except (ValueError, TypeError):
-            self.add_page("Page 1")
-            return
-
         self.bus.set_theme(Theme.from_dict(data.get("theme")))
         self._apply_window_style()
         self._global_header = data.get("header") or None
@@ -709,3 +824,31 @@ class DashboardWindow(QMainWindow):
         win = data.get("window", {})
         if win.get("w") and win.get("h"):
             self.resize(int(win["w"]), int(win["h"]))
+
+    # ---- persistence into the .qgz project ----
+
+    def save_to_project(self):
+        # No dashboard built yet (still on the Start screen): leave the project
+        # clean so it reopens to the Start screen rather than a blank page.
+        if not self._pages:
+            return
+        QgsProject.instance().writeEntry(
+            PROJECT_SCOPE, PROJECT_KEY, json.dumps(self._build_layout_dict()))
+
+    def load_from_project(self):
+        raw, ok = QgsProject.instance().readEntry(
+            PROJECT_SCOPE, PROJECT_KEY, "")
+        self.clear_all()
+        if not ok or not raw:
+            # fresh project, no dashboard yet: greet with the Start screen
+            self.bus.set_theme(Theme.default())
+            self._apply_window_style()
+            self.show_start()
+            return
+        try:
+            data = migrate_layout(json.loads(raw))
+        except (ValueError, TypeError):
+            self.show_start()
+            return
+        self._apply_layout_dict(data)
+        self.show_dashboard()

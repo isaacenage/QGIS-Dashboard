@@ -20,6 +20,7 @@ Appearance:
 
 import uuid
 
+from qgis.PyQt.QtGui import QPainterPath, QRegion
 from qgis.PyQt.QtWidgets import QFrame, QVBoxLayout, QLabel
 from qgis.core import (
     QgsProject,
@@ -48,8 +49,9 @@ class DashboardElement(QFrame):
         self.config["id"] = self.id
         self.setObjectName("dashboardElement")
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        # full-bleed tiles get square corners so a rectangular child (the map
-        # canvas) aligns with the frame instead of poking over rounded corners
+        # full-bleed tiles fill edge-to-edge; their rectangular child is clipped
+        # to the theme's rounded corners in _update_fullbleed_mask so the map /
+        # image follow the global corner radius like every other tile
         self.setProperty("fullBleed", bool(self.full_bleed))
 
         self._outer = QVBoxLayout(self)
@@ -104,7 +106,37 @@ class DashboardElement(QFrame):
 
     def apply_theme(self):
         self.setStyleSheet(self.effective_theme().tile_qss())
+        self._update_fullbleed_mask()
         self._restyle()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_fullbleed_mask()
+
+    def _update_fullbleed_mask(self):
+        """Clip a full-bleed tile to the theme's rounded corners.
+
+        A normal tile gets its rounded corners from the QSS ``border-radius`` on
+        ``#dashboardElement``. A full-bleed tile holds a rectangular child that
+        paints over those corners — most notably the map's ``QgsMapCanvas`` (a
+        ``QGraphicsView`` whose viewport ignores stylesheet rounding). To make
+        the map and image follow the global corner radius we mask the whole tile
+        to a rounded region (re-applied on resize / theme change). Non-full-bleed
+        tiles need no mask — their QSS rounding already shows.
+        """
+        if not self.full_bleed:
+            return
+        w, h = self.width(), self.height()
+        r = self.effective_theme().radius
+        if w <= 0 or h <= 0:
+            return
+        if r <= 0:
+            self.clearMask()
+            return
+        r = min(float(r), w / 2.0, h / 2.0)
+        path = QPainterPath()
+        path.addRoundedRect(0.0, 0.0, float(w), float(h), r, r)
+        self.setMask(QRegion(path.toFillPolygon().toPolygon()))
 
     def _restyle(self):
         """Hook for subclasses with custom-painted views; default repaint."""

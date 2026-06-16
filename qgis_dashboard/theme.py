@@ -14,6 +14,37 @@ container chrome is styled through ``Theme.window_qss`` / ``tile_qss``.
 
 import copy
 
+# The plugin CHROME (left rail, tabs, dialogs, the Settings hub, the Start
+# screen, status bar, inspector panel, menus …) is locked to this fixed
+# **System Font** and is deliberately NOT affected by the dashboard theme — the
+# theme's fonts style only the canvas tiles. Century Gothic is the chosen system
+# face; the rest are graceful fallbacks. This stack is a constant: it is never
+# read from a Theme and can never be changed by the user.
+SYSTEM_FONT_FAMILY = "Century Gothic"
+SYSTEM_FONT_STACK = (
+    '"Century Gothic", "Questrial", "Segoe UI", "Helvetica Neue", '
+    "Arial, sans-serif"
+)
+
+# The plugin CHROME palette is **fixed** for the same reason the System font is:
+# the dashboard theme styles the canvas only, so the left rail (and its icons),
+# the page tab bar, dialogs, the Settings hub, the inspector panel, the element
+# picker and the status bar keep this neutral light look no matter which theme
+# or preset is applied. These values mirror the default light theme and are
+# never read from a ``Theme`` — chrome consumers import them directly.
+CHROME = {
+    "bg": "#ffffff",         # window / rail / tab-strip / dialog background
+    "surface": "#ffffff",    # input / table / menu surface
+    "text": "#252b33",       # chrome foreground (labels, icons)
+    "muted": "#55606d",      # secondary chrome foreground
+    "accent": "#2b7de9",     # chrome highlight (selected tab, primary button)
+    "accent_hover": "#246bc8",            # ~0.86 * accent
+    "brand_soft": "rgba(43, 125, 233, 0.10)",
+    "border": "#e2e6ec",     # chrome hairlines / dividers
+    "selection": "#e5e7eb",  # selected row / pressed fill
+    "zebra": "#f6f8fb",      # table header / alt row
+}
+
 # "Modern analytics" default palette (Summarizer design system, blue brand).
 # A cool neutral canvas, white surfaces, hairline borders, one strong accent.
 DEFAULT_SERIES = [
@@ -150,7 +181,9 @@ class Theme(object):
         be dark). Adapted from the Summarizer design system.
         """
         return """
-* {{ font-family:{font_family}; }}
+/* The whole plugin chrome is locked to the fixed System font; only the canvas
+   tiles (re-styled per-tile via tile_qss) use the dashboard theme's fonts. */
+* {{ font-family:{system_font}; }}
 QMainWindow, QDialog {{ background:{chrome_bg}; }}
 QWidget {{ color:{text}; }}
 QFrame {{ border:none; background:transparent; }}
@@ -170,7 +203,7 @@ QToolButton#dashRailButton:focus {{ border-color:{accent}; }}
 /* Status bar ------------------------------------------------------------- */
 QStatusBar {{ background:{chrome_bg}; border-top:1px solid {border}; }}
 QStatusBar::item {{ border:none; }}
-#dashFilterStatus {{ color:{muted}; {small_font} background:transparent; }}
+#dashFilterStatus {{ color:{muted}; font-size:11px; background:transparent; }}
 #dashFilterDot {{ background:{accent}; border-radius:4px; }}
 
 /* Page tab strip (tab bar + lock/export buttons) ------------------------- */
@@ -194,32 +227,37 @@ QStackedWidget {{ background:{chrome_bg}; }}
    their container's chrome — the *canvas background* must never leak into them. */
 QScrollArea {{ background:transparent; border:none; }}
 /* The canvas drawing-area background is scoped to the canvas and the page view
-   that holds it (so overflow when zoomed/panned matches the canvas), nowhere else. */
-#dashPageView, #dashCanvas {{ background:{window_bg}; }}
+   that holds it (so overflow when zoomed/panned matches the canvas), nowhere else.
+   #dashPageWrap is the page container that also docks the header banner *outside*
+   the scroll area — it gets window_bg too so the area behind the (rounded) header
+   card matches the canvas color instead of leaking white. */
+#dashPageWrap, #dashPageView, #dashCanvas {{ background:{window_bg}; }}
 
-/* Tiles ------------------------------------------------------------------ */
+/* Tiles — the only place the dashboard THEME colors are used. Everything above
+   and below is fixed chrome; these canvas_* / tile_* tokens carry the theme. */
 #dashboardElement {{
-    background:{surface_bg}; border:1px solid {border};
+    background:{tile_bg}; border:1px solid {tile_border};
     border-radius:{radius}px;
 }}
-/* full-bleed tiles (e.g. the live map) fill edge-to-edge: square corners so a
-   rectangular child aligns with the frame, and no inner background bleed. */
-#dashboardElement[fullBleed="true"] {{ border-radius:0; }}
+/* full-bleed tiles (e.g. the live map, image) fill edge-to-edge but still
+   follow the global corner radius: their rectangular child (e.g. the map's
+   QgsMapCanvas) is clipped to a matching rounded region in
+   DashboardElement._update_fullbleed_mask, so the rounded QSS border shows. */
 #tileHeader {{ background:transparent; }}
-#tileTitle {{ color:{text}; {heading_font} font-weight:600; }}
-#tileClose {{ color:{muted}; border:none; background:transparent; }}
-#tileClose:hover {{ color:{accent}; }}
-#elementTitle {{ color:{text}; {heading_font} font-weight:600; }}
-#elementDescription {{ color:{muted}; {small_font} }}
-#indValue {{ color:{accent}; font-family:{heading_stack}; font-size:{value_size}px; font-weight:700; }}
-#indTop, #indBottom {{ color:{muted}; {small_font} }}
-QLabel {{ color:{text}; {base_font} background:transparent; }}
-QLabel[connHint="true"] {{ color:{muted}; {small_font} }}
+#tileTitle {{ color:{canvas_text}; {heading_font} font-weight:600; }}
+#tileClose {{ color:{canvas_muted}; border:none; background:transparent; }}
+#tileClose:hover {{ color:{canvas_accent}; }}
+#elementTitle {{ color:{canvas_text}; {heading_font} font-weight:600; }}
+#elementDescription {{ color:{canvas_muted}; {small_font} }}
+#indValue {{ color:{canvas_accent}; font-family:{heading_stack}; font-size:{value_size}px; font-weight:700; }}
+#indTop, #indBottom {{ color:{canvas_muted}; {small_font} }}
+QLabel {{ color:{text}; background:transparent; }}
+QLabel[connHint="true"] {{ color:{muted}; font-size:11px; }}
 
 /* Buttons ---------------------------------------------------------------- */
 QPushButton {{
     min-height:32px; padding:7px 16px; border-radius:10px;
-    border:1px solid transparent; font-weight:600; {base_font}
+    border:1px solid transparent; font-weight:600;
     background:{accent}; color:#ffffff;
 }}
 QPushButton:hover {{ background:{accent_hover}; }}
@@ -262,7 +300,7 @@ QComboBox QAbstractItemView {{
     selection-background-color:{selection}; selection-color:{text};
 }}
 QToolButton {{ color:{text}; }}
-QCheckBox, QRadioButton {{ color:{text}; {base_font} background:transparent; }}
+QCheckBox, QRadioButton {{ color:{text}; background:transparent; }}
 
 /* Sliders (e.g. the global corner-radius control) ------------------------ */
 QSlider::groove:horizontal {{
@@ -278,7 +316,7 @@ QSlider::handle:horizontal:hover {{ background:{accent_hover}; }}
 /* Group boxes (themed surface + hairline, never the dark app palette) ----- */
 QGroupBox {{
     background:{surface_bg}; border:1px solid {border}; border-radius:10px;
-    margin-top:14px; padding:14px 12px 10px 12px; {base_font} font-weight:600;
+    margin-top:14px; padding:14px 12px 10px 12px; font-weight:600;
     color:{text};
 }}
 QGroupBox::title {{
@@ -289,7 +327,7 @@ QGroupBox::title {{
 /* Tables and lists ------------------------------------------------------- */
 QTableWidget, QTableView {{
     background:{surface_bg}; color:{text}; gridline-color:{border};
-    border:1px solid {border}; border-radius:10px; {base_font}
+    border:1px solid {border}; border-radius:10px;
     selection-background-color:{selection}; selection-color:{text};
     alternate-background-color:{zebra};
 }}
@@ -331,15 +369,20 @@ QMenu::item {{ padding:6px 18px; border-radius:6px; color:{text}; }}
 QMenu::item:selected {{ background:{brand_soft}; color:{accent}; }}
 QToolTip {{
     background:#111827; color:#ffffff; border:none; border-radius:6px;
-    padding:5px 8px; {small_font}
+    padding:5px 8px; font-size:11px;
 }}
 """.format(
-            chrome_bg=self.chrome_bg, window_bg=self.window_bg,
-            surface_bg=self.surface_bg, border=self.border, radius=self.radius,
-            text=self.text, muted=self.text_muted, accent=self.accent,
-            accent_hover=self._accent_hover(), zebra=self.zebra,
-            selection=self.selection, brand_soft=self._brand_soft(),
-            value_size=self.value_size, font_family=self.font_stack(),
+            # --- CHROME: fixed palette, never the dashboard theme -----------
+            chrome_bg=CHROME["bg"], surface_bg=CHROME["surface"],
+            border=CHROME["border"], text=CHROME["text"], muted=CHROME["muted"],
+            accent=CHROME["accent"], accent_hover=CHROME["accent_hover"],
+            zebra=CHROME["zebra"], selection=CHROME["selection"],
+            brand_soft=CHROME["brand_soft"], system_font=SYSTEM_FONT_STACK,
+            # --- CANVAS: the dashboard theme (tiles + canvas only) ----------
+            window_bg=self.window_bg, tile_bg=self.surface_bg,
+            tile_border=self.border, radius=self.radius,
+            canvas_text=self.text, canvas_muted=self.text_muted,
+            canvas_accent=self.accent, value_size=self.value_size,
             heading_stack=self.heading_stack(),
             heading_font=self._heading_rule(self.title_size),
             small_font=self._font_rule(11),
@@ -364,14 +407,44 @@ QToolTip {{
         return "rgba({}, {}, {}, 0.10)".format(r, g, b)
 
     def tile_qss(self):
-        """Per-tile override stylesheet (scoped to one tile via objectName)."""
+        """Per-tile stylesheet — applied to every tile, scoped to that tile's
+        subtree via the widget it is set on.
+
+        The window chrome is locked to a fixed System font **and a fixed
+        palette**, so each tile re-applies the dashboard **theme** (fonts *and*
+        colors) to its own content here: labels, titles, the indicator value,
+        secondary text, embedded tables/lists and any inline inputs (e.g. the
+        category selector's combo). This is what keeps theme colors strictly
+        inside the canvas."""
         return """
 #dashboardElement {{ background:{surface_bg}; }}
 #elementTitle, #tileTitle {{ color:{text}; {heading_font} font-weight:600; }}
+#tileClose {{ color:{muted}; }}
+#tileClose:hover {{ color:{accent}; }}
+#elementDescription, #indTop, #indBottom {{ color:{muted}; }}
 #indValue {{ color:{accent}; font-family:{heading_stack}; font-size:{value_size}px; font-weight:700; }}
 QLabel {{ color:{text}; {base_font} }}
+QToolButton {{ color:{text}; }}
+QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox, QPlainTextEdit, QTextEdit {{
+    background:{surface_bg}; color:{text}; border:1px solid {border};
+}}
+QComboBox QAbstractItemView {{
+    background:{surface_bg}; color:{text}; border:1px solid {border};
+    selection-background-color:{selection}; selection-color:{text};
+}}
+QTableWidget, QTableView, QTreeWidget, QListWidget {{
+    {base_font} background:{surface_bg}; color:{text}; gridline-color:{border};
+    border:1px solid {border}; selection-background-color:{selection};
+    selection-color:{text}; alternate-background-color:{zebra};
+}}
+QHeaderView::section {{
+    {base_font} background:{zebra}; color:{text}; font-weight:600; border:none;
+    border-right:1px solid {border}; border-bottom:1px solid {border};
+}}
 """.format(
             surface_bg=self.surface_bg, text=self.text, accent=self.accent,
+            muted=self.text_muted, border=self.border,
+            selection=self.selection, zebra=self.zebra,
             value_size=self.value_size, heading_stack=self.heading_stack(),
             heading_font=self._heading_rule(self.title_size),
             base_font=self._font_rule(self.font_size),

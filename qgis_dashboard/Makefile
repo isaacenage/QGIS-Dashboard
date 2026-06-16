@@ -38,16 +38,16 @@ LOCALES =
 # translation
 SOURCES = \
 	__init__.py \
-	qgis_dashboard.py window.py bus.py theme.py presets.py icons.py fonts.py sidebar.py dashboard_canvas.py page_view.py \
-	add_element_dialog.py settings_dialog.py appearance_dialog.py connections_dialog.py export_dialog.py \
+	qgis_dashboard.py window.py bus.py theme.py presets.py icons.py fonts.py sidebar.py minimized_bubble.py dashboard_canvas.py page_view.py zoom_fit.py tile_snap.py \
+	add_element_dialog.py element_picker.py settings_dialog.py appearance_dialog.py connections_dialog.py side_panel.py form_util.py export_dialog.py \
 	project_io.py recent_store.py start_view.py
 
 PLUGINNAME = qgis_dashboard
 
 PY_FILES = \
 	__init__.py \
-	qgis_dashboard.py window.py bus.py theme.py presets.py icons.py fonts.py sidebar.py dashboard_canvas.py page_view.py \
-	add_element_dialog.py settings_dialog.py appearance_dialog.py connections_dialog.py export_dialog.py \
+	qgis_dashboard.py window.py bus.py theme.py presets.py icons.py fonts.py sidebar.py minimized_bubble.py dashboard_canvas.py page_view.py zoom_fit.py tile_snap.py \
+	add_element_dialog.py element_picker.py settings_dialog.py appearance_dialog.py connections_dialog.py side_panel.py form_util.py export_dialog.py \
 	project_io.py recent_store.py start_view.py
 
 UI_FILES =

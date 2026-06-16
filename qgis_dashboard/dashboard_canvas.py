@@ -15,19 +15,27 @@ constraint kept from the old grid). Zoom is owned per-page by :class:`PageView`,
 which calls :meth:`DashboardCanvas.set_zoom`.
 """
 
-from qgis.PyQt.QtCore import Qt, QPoint, QPointF, pyqtSignal
-from qgis.PyQt.QtGui import QPainter, QColor, QPixmap, QRegion
+from qgis.PyQt.QtCore import Qt, QPoint, QPointF, QRect, pyqtSignal
+from qgis.PyQt.QtGui import QPainter, QColor, QPen, QPixmap
 from qgis.PyQt.QtWidgets import QWidget, QFrame, QVBoxLayout, QToolButton, QMenu
+
+from .tile_snap import snap_rect, nearest_free
 
 HEADER_H = 20        # px drag strip height
 GRIP = 16            # px resize grip square
 SNAP = 8             # px snap step applied on drag/resize release
+SNAP_PULL = 16       # logical px range an edge is magnetically pulled to a neighbour
 MARGIN = 12          # px breathing room kept around content when growing
 MIN_TILE = 120       # px minimum tile width/height (logical)
 DEFAULT_W = 320      # px default new-tile size (logical)
 DEFAULT_H = 240
 MAP_W = 480          # px default size for the (larger) map tile
 MAP_H = 380
+# the export/print region (the "page") in logical px; the canvas draws a hairline
+# frame around it, Reset Zoom fits it, and PNG/PDF export render exactly this rect
+DEFAULT_REGION_W = 1280
+DEFAULT_REGION_H = 720
+MIN_REGION = 320     # px floor for the region width/height
 
 
 def _snap(px, step=SNAP):
@@ -288,25 +296,52 @@ class GridTile(QFrame):
         if not self._active:
             return
         # clamp the live drag so the tile can never leave the canvas surface —
-        # it stops at the left/right/top/bottom edge instead of disappearing
+        # it stops at the gutter edge (``pad``) instead of disappearing
+        pad = self.canvas._pad()
         target = self._start_pos + delta
-        max_x = max(self.canvas.width() - self.width(), 0)
-        max_y = max(self.canvas.height() - self.height(), 0)
-        self.move(min(max(target.x(), 0), max_x),
-                  min(max(target.y(), 0), max_y))
+        max_x = max(self.canvas.width() - pad - self.width(), pad)
+        max_y = max(self.canvas.height() - pad - self.height(), pad)
+        self.move(min(max(target.x(), pad), max_x),
+                  min(max(target.y(), pad), max_y))
+        # live feedback: show where the tile will snap to (yellow if it fits
+        # there, red if not). The widget itself keeps following the cursor.
+        cand = self._snapped_candidate()
+        valid = self.canvas.rect_free(cand, ignore=self)
+        self.canvas.set_drop_preview(cand, valid)
+
+    def _snapped_candidate(self):
+        """The magnetically-snapped logical rect for the tile's live position."""
+        z = self.canvas.zoom() or 1.0
+        pad = self.canvas._pad()
+        lw, lh = self.w_px, self.h_px
+        lx = max(_snap((self.x() - pad) / z), 0)
+        ly = max(_snap((self.y() - pad) / z), 0)
+        return self.canvas.snap_for((lx, ly, lw, lh), ignore=self)
 
     def end_move(self):
         if not self._active:
             return
         self._active = False
-        z = self.canvas.zoom() or 1.0
-        lw, lh = self.w_px, self.h_px
-        lcw, lch = self.canvas.logical_size()
-        max_lx = max(int(round(lcw - lw)), 0)
-        max_ly = max(int(round(lch - lh)), 0)
-        lx = min(max(_snap(self.x() / z), 0), max_lx)
-        ly = min(max(_snap(self.y() / z), 0), max_ly)
-        self._commit_or_revert((lx, ly, lw, lh))
+        self.canvas.set_drop_preview(None, True)
+        self.canvas.show_guides(False)
+        # snap to neighbours/page edges; if that still overlaps, slide to the
+        # nearest free slot — never revert to the drag-start position.
+        cand = self._snapped_candidate()
+        if not self.canvas.rect_free(cand, ignore=self):
+            cand = self.canvas.fit_for(cand, ignore=self)
+        self._commit_move(cand)
+
+    def _commit_move(self, new_rect):
+        """Place the tile at *new_rect* (logical) and persist — no revert path.
+
+        Even when the rect could not be freed (a fully packed page), the tile is
+        placed where it landed rather than snapping back to its origin.
+        """
+        self.x_px, self.y_px, self.w_px, self.h_px = new_rect
+        self.canvas.place(self)
+        self.canvas.sync_size()
+        if new_rect != self._prev:
+            self.geometryCommitted.emit()
 
     # ---- resize ----
 
@@ -334,8 +369,9 @@ class GridTile(QFrame):
             return
         self._active = False
         z = self.canvas.zoom() or 1.0
-        lx = max(0, _snap(self.x() / z))
-        ly = max(0, _snap(self.y() / z))
+        pad = self.canvas._pad()
+        lx = max(0, _snap((self.x() - pad) / z))
+        ly = max(0, _snap((self.y() - pad) / z))
         lw = max(MIN_TILE, _snap(self.width() / z))
         lh = max(MIN_TILE, _snap(self.height() / z))
         self._commit_or_revert((lx, ly, lw, lh))
@@ -350,6 +386,57 @@ class GridTile(QFrame):
                 self.geometryCommitted.emit()
         else:
             self.canvas.place(self)   # snap back to current pixel rect
+
+
+class _DropOverlay(QWidget):
+    """Full-canvas, mouse-transparent overlay painting the live drop preview.
+
+    A rect painted in :meth:`DashboardCanvas.paintEvent` would be hidden behind
+    the opaque tile widgets, so the drag feedback (yellow landing zone / red
+    "won't fit") is drawn here instead — this overlay is raised above every tile
+    while a move is in progress and hidden the rest of the time.
+    """
+
+    def __init__(self, canvas):
+        super().__init__(canvas)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._rect = None        # display-px (x, y, w, h) or None
+        self._valid = True
+        self.hide()
+
+    def show_preview(self, display_rect, valid):
+        self._rect = display_rect
+        self._valid = valid
+        self.setGeometry(0, 0, self.parent().width(), self.parent().height())
+        self.show()
+        self.raise_()
+        self.update()
+
+    def clear_preview(self):
+        self._rect = None
+        self.hide()
+
+    def paintEvent(self, _e):
+        if self._rect is None:
+            return
+        x, y, w, h = self._rect
+        if w <= 0 or h <= 0:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self._valid:
+            fill = QColor(255, 214, 0, 70)     # translucent yellow landing zone
+            edge = QColor(214, 180, 0, 200)
+        else:
+            fill = QColor(229, 57, 53, 80)      # translucent red "won't fit"
+            edge = QColor(198, 40, 40, 210)
+        p.fillRect(x, y, w, h, fill)
+        pen = QPen(edge)
+        pen.setWidth(2)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRect(x, y, max(w - 1, 1), max(h - 1, 1))
+        p.end()
 
 
 class DashboardCanvas(QWidget):
@@ -367,13 +454,19 @@ class DashboardCanvas(QWidget):
         self.rows = max(int(rows), 1)
         self._tiles = []
         self._guides = False
+        self._exporting = False   # suppress region frame/scrim while exporting
         self._zoom = 1.0
         self._locked = False
         # global element gap (logical px): transparent breathing room inset
         # around every tile's card. 0 == cards may sit edge to edge.
         self.gap = 0
+        # the export/print region (the "page") in logical px — the canvas draws a
+        # hairline frame around it, Reset Zoom fits it, and export renders it.
+        self.region_w = DEFAULT_REGION_W
+        self.region_h = DEFAULT_REGION_H
         self.setObjectName("dashCanvas")
         self.setMinimumSize(480, 360)
+        self._drop_overlay = _DropOverlay(self)
         if bus is not None:
             bus.themeChanged.connect(self.update)
 
@@ -399,47 +492,73 @@ class DashboardCanvas(QWidget):
         self.sync_size()
         self.update()
 
+    # ---- export/print region (the "page") ----
+
+    def region_size(self):
+        """The export/print region in logical (zoom-1.0) px ``(w, h)``."""
+        return (self.region_w, self.region_h)
+
+    def set_region(self, w, h):
+        """Set the export/print region size (logical px) and repaint/regrow.
+
+        The region defines the page the dashboard is laid out on: the canvas
+        draws a hairline frame around it, Reset Zoom fits it to the viewport,
+        and PNG/PDF export render exactly this rect. Tiles may still be dragged
+        beyond it (they overflow the page and are cropped on export).
+        """
+        self.region_w = max(MIN_REGION, int(w))
+        self.region_h = max(MIN_REGION, int(h))
+        self.sync_size()
+        self.update()
+
     # ---- element gap (global spacing) ----
 
     def set_gap(self, px):
         """Set the global element gap (logical px) and re-apply it live.
 
-        The gap is rendered as a transparent inset around each tile's card, so
-        adjacent elements always keep this breathing room no matter how they
-        are dragged. Re-placing every tile picks up the new inset.
+        The gap is rendered as a transparent inset around each tile's card plus
+        a matching outer gutter (see :meth:`_pad`), so the spacing is even
+        between cards and at the edges no matter how tiles are dragged.
+        Re-placing every tile picks up the new inset; the surface is re-grown so
+        the wider gutter stays scroll-reachable.
         """
         self.gap = max(0, int(px))
         self.reflow()
+        self.sync_size()
         self.update()
 
     def _tile_inset(self):
         """The card inset in display pixels (the gap scaled by the zoom)."""
         return int(round(self.gap * (self._zoom or 1.0)))
 
+    def _pad(self):
+        """Outer gutter (display px) so edge gaps match the inter-card gap.
+
+        Every tile's card is inset by :meth:`_tile_inset` on all four sides, so
+        the gap *between* two adjacent cards is twice the inset, while the gap
+        from a card to a canvas edge (or to a page's docked header banner, which
+        sits flush against the canvas top) would otherwise be only one inset —
+        half as much. Reserving a one-inset gutter around the whole tile area
+        makes every gap equal: between cards, at the four edges, and below the
+        header. Zero when the gap is zero, so cards still reach the edge.
+        """
+        return self._tile_inset()
+
     # ---- geometry helpers ----
 
     def tiles(self):
         return list(self._tiles)
 
-    def _viewport_size(self):
-        """Visible size to fill — the host scroll area's viewport when present."""
-        p = self.parentWidget()
-        if p is not None and p.width() > 0 and p.height() > 0:
-            return p.width(), p.height()
-        return max(self.width(), 800), max(self.height(), 600)
-
-    def _logical_viewport(self):
-        z = self._zoom or 1.0
-        vw, vh = self._viewport_size()
-        return vw / z, vh / z
-
     def logical_size(self):
         """The canvas surface size in logical (zoom-1.0) pixels.
 
-        Used to clamp tile placement so a tile stays fully on the surface.
+        Used to clamp tile placement so a tile stays fully on the surface. The
+        outer gutter (``_pad`` on each side) is excluded so tiles never land in
+        the gutter reserved to keep edge gaps even.
         """
         z = self._zoom or 1.0
-        return self.width() / z, self.height() / z
+        pad2 = 2 * self._pad()
+        return max(self.width() - pad2, 0) / z, max(self.height() - pad2, 0) / z
 
     def _content_extent(self):
         """Right/bottom extent of all tiles, in logical pixels."""
@@ -463,12 +582,55 @@ class DashboardCanvas(QWidget):
                 return False
         return True
 
+    def _other_rects(self, ignore):
+        """Logical rects of every tile except *ignore* (for snap/fit math)."""
+        return [t.grid_rect() for t in self._tiles if t is not ignore]
+
+    def snap_for(self, rect, ignore):
+        """Magnetically snap a dragged tile's logical rect to its neighbours.
+
+        Keeps the tile's size and pulls each edge to the nearest neighbour/page
+        snap line (spaced by the global element gap) within :data:`SNAP_PULL`.
+        """
+        return snap_rect(rect, self._other_rects(ignore),
+                         (self.region_w, self.region_h),
+                         gap=self.gap, threshold=SNAP_PULL)
+
+    def fit_for(self, rect, ignore):
+        """Nearest same-size placement of *rect* that overlaps nothing.
+
+        Used as the no-revert fallback when a drop lands on an occupied area:
+        the tile slides to the closest free slot instead of flying back to its
+        drag-start position.
+        """
+        return nearest_free(rect, self._other_rects(ignore),
+                            (self.region_w, self.region_h), step=SNAP)
+
+    def set_drop_preview(self, logical_rect, valid):
+        """Show the live drag feedback at *logical_rect* (None clears it).
+
+        ``valid`` picks the colour: a yellow landing zone when the tile fits
+        there, red when it does not. The rect is converted to display pixels
+        (logical x zoom, offset by the outer gutter) like a placed tile.
+        """
+        if logical_rect is None:
+            self._drop_overlay.clear_preview()
+            return
+        z = self._zoom or 1.0
+        pad = self._pad()
+        x, y, w, h = logical_rect
+        disp = (pad + int(round(x * z)), pad + int(round(y * z)),
+                int(round(w * z)), int(round(h * z)))
+        self._drop_overlay.show_preview(disp, valid)
+
     def first_free(self, w, h):
-        """Find a non-overlapping origin for a *w*x*h* tile (logical px)."""
+        """Find a non-overlapping origin for a *w*x*h* tile (logical px).
+
+        Searches within the export/print region so new tiles land on the page.
+        """
         step = 20
-        lvw, lvh = self._logical_viewport()
-        max_x = max(int(lvw - w), 0)
-        max_y = max(int(lvh - h), 0)
+        max_x = max(int(self.region_w - w), 0)
+        max_y = max(int(self.region_h - h), 0)
         y = 0
         while y <= max_y:
             x = 0
@@ -523,10 +685,15 @@ class DashboardCanvas(QWidget):
         self.layoutChanged.emit()
 
     def place(self, tile):
-        """Position one tile at ``logical x zoom`` display pixels."""
+        """Position one tile at ``pad + logical x zoom`` display pixels.
+
+        The ``pad`` outer gutter (see :meth:`_pad`) offsets every tile inward so
+        the gap at the canvas edges matches the gap between cards.
+        """
         z = self._zoom or 1.0
+        pad = self._pad()
         x, y, w, h = tile.grid_rect()
-        tile.setGeometry(int(round(x * z)), int(round(y * z)),
+        tile.setGeometry(pad + int(round(x * z)), pad + int(round(y * z)),
                          max(int(round(w * z)), 1), max(int(round(h * z)), 1))
         tile.set_inset(self._tile_inset())
 
@@ -535,14 +702,21 @@ class DashboardCanvas(QWidget):
             self.place(t)
 
     def sync_size(self):
-        """Grow the surface so it contains all tiles (and fills the viewport)."""
+        """Grow the surface so it contains the region *and* every tile.
+
+        The surface is the export/print region, expanded only when a tile has
+        been dragged past the page edge so that off-page tile stays reachable
+        (it is cropped on export). The region — not the viewport — drives the
+        size now, so Reset Zoom can fit the page exactly.
+        """
         z = self._zoom or 1.0
+        pad = self._pad()
         max_r, max_b = self._content_extent()
-        lvw, lvh = self._logical_viewport()
-        lw = max(lvw, max_r + MARGIN)
-        lh = max(lvh, max_b + MARGIN)
-        w = int(round(lw * z))
-        h = int(round(lh * z))
+        lw = max(self.region_w, max_r + MARGIN)
+        lh = max(self.region_h, max_b + MARGIN)
+        # +2*pad: the surface carries the outer gutter on top of the tile area
+        w = int(round(lw * z)) + 2 * pad
+        h = int(round(lh * z)) + 2 * pad
         if (self.minimumWidth(), self.minimumHeight()) != (w, h):
             self.setMinimumSize(w, h)
             self.resize(w, h)
@@ -567,16 +741,20 @@ class DashboardCanvas(QWidget):
     # ---- export ----
 
     def export_pixmap(self, scale=2.0):
-        """Render the whole content surface to a high-res QPixmap.
+        """Render the export/print region to a high-res QPixmap.
 
-        Exports at the logical layout (zoom 1.0) regardless of the current
-        view zoom, with the editing chrome hidden, so the result is a clean
-        image of the dashboard at *scale*x device resolution (crisp for PNG /
-        PDF). The live view's zoom and chrome are restored afterwards.
+        Exports exactly the region rect (the "page") at the logical layout
+        (zoom 1.0) regardless of the current view zoom, with the editing chrome
+        and the on-screen region frame/scrim hidden. Tiles outside the region
+        are cropped; empty space inside it becomes intentional margin — so the
+        result is always the clean rectangle the user defined, at *scale*x
+        device resolution (crisp for PNG / PDF). The live view's zoom and chrome
+        are restored afterwards.
         """
         old_zoom = self._zoom
         zoom_changed = abs(old_zoom - 1.0) > 1e-6
         self.show_guides(False)
+        self._exporting = True
         for t in self._tiles:
             t.set_chrome_visible(False)
         try:
@@ -584,23 +762,60 @@ class DashboardCanvas(QWidget):
                 self.set_zoom(1.0)   # reflows + grows the surface to content
             else:
                 self.sync_size()
-            max_r, max_b = self._content_extent()
-            w = max(int(round(max_r + MARGIN)), 1)
-            h = max(int(round(max_b + MARGIN)), 1)
+            pad = self._pad()   # at zoom 1.0 the region sits at (pad, pad)
             scale = max(0.5, float(scale))
-            pm = QPixmap(int(round(w * scale)), int(round(h * scale)))
-            pm.setDevicePixelRatio(scale)
             theme = self.bus.theme if self.bus is not None else None
-            pm.fill(QColor(theme.window_bg) if theme else QColor("#f4f6f8"))
-            self.render(pm, QPoint(0, 0), QRegion(0, 0, w, h))
+            bg = QColor(theme.window_bg) if theme else QColor("#f4f6f8")
+            # render the full surface, then crop out exactly the region rect —
+            # unambiguous regardless of any off-page tiles growing the surface
+            full = QPixmap(max(int(round(self.width() * scale)), 1),
+                           max(int(round(self.height() * scale)), 1))
+            full.setDevicePixelRatio(scale)
+            full.fill(bg)
+            self.render(full, QPoint(0, 0))
+            src = QRect(int(round(pad * scale)), int(round(pad * scale)),
+                        max(int(round(self.region_w * scale)), 1),
+                        max(int(round(self.region_h * scale)), 1))
+            pm = full.copy(src)
+            pm.setDevicePixelRatio(scale)
             return pm
         finally:
+            self._exporting = False
             for t in self._tiles:
                 t.set_chrome_visible(True)
             if zoom_changed:
                 self.set_zoom(old_zoom)
 
     # ---- painting ----
+
+    def _region_display_rect(self):
+        """The export/print region as a display-pixel ``(x, y, w, h)`` tuple."""
+        z = self._zoom or 1.0
+        pad = self._pad()
+        return (pad, pad,
+                int(round(self.region_w * z)), int(round(self.region_h * z)))
+
+    def _paint_region(self, p, theme):
+        """Dim the off-page area and frame the region with a soft hairline."""
+        rx, ry, rw, rh = self._region_display_rect()
+        W, H = self.width(), self.height()
+        # faint neutral scrim over the four bands outside the page (theme-neutral
+        # so it dims a light canvas without darkening to black on a dark one)
+        scrim = QColor(120, 128, 138, 38)
+        for band in ((0, 0, W, ry),                       # top
+                     (0, ry + rh, W, H - (ry + rh)),      # bottom
+                     (0, ry, rx, rh),                     # left
+                     (rx + rw, ry, W - (rx + rw), rh)):   # right
+            bx, by, bw, bh = band
+            if bw > 0 and bh > 0:
+                p.fillRect(bx, by, bw, bh, scrim)
+        # soft hairline frame (the same border colour the chrome uses)
+        pen = QPen(QColor(theme.border) if theme else QColor("#e2e6ec"))
+        pen.setCosmetic(True)
+        pen.setWidth(1)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRect(rx, ry, max(rw - 1, 1), max(rh - 1, 1))
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
@@ -614,18 +829,25 @@ class DashboardCanvas(QWidget):
         # "Canvas background" colour) so it never inherits the QGIS palette
         bg = QColor(theme.window_bg) if theme else QColor("#f4f6f8")
         p.fillRect(self.rect(), bg)
+        # the export/print region (the "page"): dim everything outside it with a
+        # faint neutral scrim and frame it with a soft hairline, so it reads
+        # clearly as the page the dashboard will export to. Suppressed while
+        # exporting (the saved image *is* the page — no frame inside it).
+        if not self._exporting:
+            self._paint_region(p, theme)
         # while a tile is being dragged/resized, hint the 8px snap with a faint
         # dot lattice (coarsely spaced) — otherwise the canvas stays clean
         if self._guides:
             dot = QColor(theme.grid_line) if theme else QColor("#c4ccd4")
             dot.setAlpha(150)
             step = SNAP * 5 * (self._zoom or 1.0)
+            pad = self._pad()   # align the lattice with the gutter-offset tiles
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(dot)
-            x = 0.0
-            while x <= self.width():
-                y = 0.0
-                while y <= self.height():
+            x = float(pad)
+            while x <= self.width() - pad:
+                y = float(pad)
+                while y <= self.height() - pad:
                     p.drawEllipse(QPointF(x, y), 1.4, 1.4)
                     y += step
                 x += step

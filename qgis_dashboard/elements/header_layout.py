@@ -48,6 +48,62 @@ def inner_box_direction(logo_slot):
     return _SLOT.get(logo_slot, _SLOT["left"])
 
 
+def banner_compose(anchor, thickness, canvas_w, canvas_h):
+    """Geometry for compositing a docked banner with the canvas image.
+
+    Given the dock *anchor*, the banner *thickness*, and the rendered canvas
+    size, return where the banner and the canvas sit within the combined image
+    (the layout the live :class:`~page_view.PageView` produces, flattened for a
+    static PNG/PDF export). All values are in the same logical units as the
+    inputs. Unknown anchors fall back to ``top``.
+
+    Returns ``(total_w, total_h, banner_pos, banner_size, canvas_pos)`` where the
+    ``*_pos``/``*_size`` entries are ``(x, y)`` / ``(w, h)`` tuples.
+    """
+    orient, banner_first = box_direction(anchor)
+    if orient == "v":                       # top / bottom -> banner spans width
+        banner_size = (canvas_w, thickness)
+        total_w, total_h = canvas_w, canvas_h + thickness
+        if banner_first:                    # top
+            banner_pos, canvas_pos = (0, 0), (0, thickness)
+        else:                               # bottom
+            banner_pos, canvas_pos = (0, canvas_h), (0, 0)
+    else:                                   # left / right -> banner spans height
+        banner_size = (thickness, canvas_h)
+        total_w, total_h = canvas_w + thickness, canvas_h
+        if banner_first:                    # left
+            banner_pos, canvas_pos = (0, 0), (thickness, 0)
+        else:                               # right
+            banner_pos, canvas_pos = (canvas_w, 0), (0, 0)
+    return total_w, total_h, banner_pos, banner_size, canvas_pos
+
+
+def header_tile_placement(anchor, thickness, region_w, region_h):
+    """Place a legacy docked header as a canvas tile on its old edge.
+
+    Converts the out-of-canvas banner model into a free-placed tile: returns
+    the header tile's logical rect, the ``(dx, dy)`` shift to apply to every
+    existing tile so it does not overlap the band, and the grown region size
+    that now includes the band. Unknown anchors fall back to ``top``.
+
+    Returns ``(header_rect, (dx, dy), (new_w, new_h))`` where ``header_rect`` is
+    an ``(x, y, w, h)`` tuple, all in logical (zoom-1.0) pixels.
+    """
+    orient, banner_first = box_direction(anchor)
+    if orient == "v":                       # top / bottom -> full-width band
+        if banner_first:                    # top
+            return ((0, 0, region_w, thickness), (0, thickness),
+                    (region_w, region_h + thickness))
+        return ((0, region_h, region_w, thickness), (0, 0),     # bottom
+                (region_w, region_h + thickness))
+    # left / right -> full-height band
+    if banner_first:                        # left
+        return ((0, 0, thickness, region_h), (thickness, 0),
+                (region_w + thickness, region_h))
+    return ((region_w, 0, thickness, region_h), (0, 0),         # right
+            (region_w + thickness, region_h))
+
+
 def resolve_header(page_header, global_header):
     """Pick the header config to render for one page.
 

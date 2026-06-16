@@ -20,50 +20,7 @@ import unittest
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "elements"))
 
-from header_layout import (banner_compose, box_direction,
-                           header_tile_placement, materialize_header_tiles)
-
-
-class BannerComposeTest(unittest.TestCase):
-    """Geometry for flattening a docked banner + canvas into one export image."""
-
-    def test_top_banner_stacks_above_canvas(self):
-        total_w, total_h, banner_pos, banner_size, canvas_pos = banner_compose(
-            "top", 80, 1000, 600)
-        self.assertEqual((total_w, total_h), (1000, 680))
-        self.assertEqual(banner_pos, (0, 0))
-        self.assertEqual(banner_size, (1000, 80))      # spans full width
-        self.assertEqual(canvas_pos, (0, 80))          # canvas pushed down
-
-    def test_bottom_banner_sits_below_canvas(self):
-        total_w, total_h, banner_pos, banner_size, canvas_pos = banner_compose(
-            "bottom", 80, 1000, 600)
-        self.assertEqual((total_w, total_h), (1000, 680))
-        self.assertEqual(canvas_pos, (0, 0))
-        self.assertEqual(banner_pos, (0, 600))         # below the canvas
-        self.assertEqual(banner_size, (1000, 80))
-
-    def test_left_banner_spans_height(self):
-        total_w, total_h, banner_pos, banner_size, canvas_pos = banner_compose(
-            "left", 120, 1000, 600)
-        self.assertEqual((total_w, total_h), (1120, 600))
-        self.assertEqual(banner_pos, (0, 0))
-        self.assertEqual(banner_size, (120, 600))      # spans full height
-        self.assertEqual(canvas_pos, (120, 0))         # canvas pushed right
-
-    def test_right_banner_sits_right_of_canvas(self):
-        total_w, total_h, banner_pos, banner_size, canvas_pos = banner_compose(
-            "right", 120, 1000, 600)
-        self.assertEqual((total_w, total_h), (1120, 600))
-        self.assertEqual(canvas_pos, (0, 0))
-        self.assertEqual(banner_pos, (1000, 0))        # right of the canvas
-        self.assertEqual(banner_size, (120, 600))
-
-    def test_unknown_anchor_falls_back_to_top(self):
-        self.assertEqual(banner_compose("sideways", 50, 200, 100),
-                         banner_compose("top", 50, 200, 100))
-        # and matches box_direction's own fallback
-        self.assertEqual(box_direction("sideways"), box_direction("top"))
+from header_layout import header_tile_placement, materialize_header_tiles
 
 
 class HeaderTilePlacementTest(unittest.TestCase):

@@ -3,12 +3,14 @@
 
 Qt-free and side-effect-free so the geometry decisions can be unit-tested on
 plain values, following the :mod:`pivot_engine` / :mod:`export.serialize`
-precedent. Three small functions:
+precedent. Small functions:
 
-* :func:`box_direction` — how the page container stacks ``[banner, scroll]``
-  for a given dock edge.
-* :func:`inner_box_direction` — how the logo and title stack inside the banner
+* :func:`inner_box_direction` — how the logo and title stack inside the header
   for a given logo slot.
+* :func:`header_tile_placement` — where a legacy docked header lands as a free
+  canvas tile (rect, tile shift, grown region).
+* :func:`materialize_header_tiles` — fold legacy global/per-page headers into
+  each page's tile list.
 * :func:`resolve_header` — which header config a page renders (a per-page header
   overrides the global one).
 """
@@ -32,50 +34,12 @@ _SLOT = {
 }
 
 
-def box_direction(anchor):
-    """Return ``(orientation, banner_first)`` for a dock *anchor* edge.
-
-    Unknown anchors fall back to ``top``.
-    """
-    return _ANCHOR.get(anchor, _ANCHOR["top"])
-
-
 def inner_box_direction(logo_slot):
     """Return ``(orientation, logo_first)`` for a *logo_slot* inside the banner.
 
     Unknown slots fall back to ``left``.
     """
     return _SLOT.get(logo_slot, _SLOT["left"])
-
-
-def banner_compose(anchor, thickness, canvas_w, canvas_h):
-    """Geometry for compositing a docked banner with the canvas image.
-
-    Given the dock *anchor*, the banner *thickness*, and the rendered canvas
-    size, return where the banner and the canvas sit within the combined image
-    (the layout the live :class:`~page_view.PageView` produces, flattened for a
-    static PNG/PDF export). All values are in the same logical units as the
-    inputs. Unknown anchors fall back to ``top``.
-
-    Returns ``(total_w, total_h, banner_pos, banner_size, canvas_pos)`` where the
-    ``*_pos``/``*_size`` entries are ``(x, y)`` / ``(w, h)`` tuples.
-    """
-    orient, banner_first = box_direction(anchor)
-    if orient == "v":                       # top / bottom -> banner spans width
-        banner_size = (canvas_w, thickness)
-        total_w, total_h = canvas_w, canvas_h + thickness
-        if banner_first:                    # top
-            banner_pos, canvas_pos = (0, 0), (0, thickness)
-        else:                               # bottom
-            banner_pos, canvas_pos = (0, canvas_h), (0, 0)
-    else:                                   # left / right -> banner spans height
-        banner_size = (thickness, canvas_h)
-        total_w, total_h = canvas_w + thickness, canvas_h
-        if banner_first:                    # left
-            banner_pos, canvas_pos = (0, 0), (thickness, 0)
-        else:                               # right
-            banner_pos, canvas_pos = (canvas_w, 0), (0, 0)
-    return total_w, total_h, banner_pos, banner_size, canvas_pos
 
 
 def header_tile_placement(anchor, thickness, region_w, region_h):
@@ -89,7 +53,8 @@ def header_tile_placement(anchor, thickness, region_w, region_h):
     Returns ``(header_rect, (dx, dy), (new_w, new_h))`` where ``header_rect`` is
     an ``(x, y, w, h)`` tuple, all in logical (zoom-1.0) pixels.
     """
-    orient, banner_first = box_direction(anchor)
+    # top/bottom -> full-width horizontal band; left/right -> full-height band
+    orient, banner_first = _ANCHOR.get(anchor, _ANCHOR["top"])
     if orient == "v":                       # top / bottom -> full-width band
         if banner_first:                    # top
             return ((0, 0, region_w, thickness), (0, thickness),

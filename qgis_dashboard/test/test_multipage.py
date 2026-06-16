@@ -475,14 +475,6 @@ class StartScreenAndFileTest(unittest.TestCase):
 class HeaderLayoutTest(unittest.TestCase):
     """Pure layout helpers for the header banner."""
 
-    def test_box_direction_per_anchor(self):
-        from elements.header_layout import box_direction
-        self.assertEqual(box_direction("top"), ("v", True))
-        self.assertEqual(box_direction("bottom"), ("v", False))
-        self.assertEqual(box_direction("left"), ("h", True))
-        self.assertEqual(box_direction("right"), ("h", False))
-        self.assertEqual(box_direction("nonsense"), ("v", True))  # falls back to top
-
     def test_inner_box_direction_per_slot(self):
         from elements.header_layout import inner_box_direction
         self.assertEqual(inner_box_direction("left"), ("h", True))

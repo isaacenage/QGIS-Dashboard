@@ -20,6 +20,7 @@ from export.serialize import (
 from export.theme_css import theme_to_css_vars
 from export.html_builder import build_html, embed_json
 from export.basemap import xyz_template_to_leaflet, OSM_BASEMAP
+from export.size_estimate import estimate_layer_bytes
 
 
 class CleanConfigTest(unittest.TestCase):
@@ -243,6 +244,20 @@ class MapBlockTest(unittest.TestCase):
                               "tiles": []}],
                             {"L1": {"fields": [], "features": [], "geometry": []}})
         self.assertIn("geometry", model["layers"]["L1"])
+
+
+class SizeEstimateTest(unittest.TestCase):
+    def test_geometry_adds_to_estimate(self):
+        base = estimate_layer_bytes(100, 5, include_geometry=False)
+        with_geom = estimate_layer_bytes(100, 5, include_geometry=True)
+        self.assertGreater(with_geom, base)
+
+    def test_zero_features_is_zero(self):
+        self.assertEqual(estimate_layer_bytes(0, 5, include_geometry=True), 0)
+
+    def test_field_count_floored_at_one(self):
+        # 0 fields must not zero out the attribute estimate
+        self.assertGreater(estimate_layer_bytes(10, 0, include_geometry=False), 0)
 
 
 if __name__ == "__main__":

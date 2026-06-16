@@ -101,12 +101,13 @@ def image_data_uri(path):
 def layer_size_info(layer):
     """Return ``(feature_count, estimated_bytes)`` for the size guard.
 
-    The byte estimate is deliberately rough — feature count times field count
-    times an average cell size — enough to flag a layer that would bloat the
-    single-file export.
+    The byte estimate (from :mod:`size_estimate`) now includes the per-feature
+    WGS84 geometry the interactive map embeds, so the guard reflects the real
+    single-file payload.
     """
+    from .size_estimate import estimate_layer_bytes
     count = layer.featureCount()
     if count is None or count < 0:
         count = 0
-    cols = max(len(layer.fields()), 1)
-    return count, count * cols * 24
+    cols = len(layer.fields())
+    return count, estimate_layer_bytes(count, cols, include_geometry=True)

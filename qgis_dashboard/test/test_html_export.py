@@ -190,6 +190,17 @@ class HtmlBuilderTest(unittest.TestCase):
         self.assertIn("&lt;evil&gt;", html)
         self.assertNotIn("<title><evil>", html)
 
+    def test_build_html_inlines_leaflet_before_runtime(self):
+        model = build_model((1, 1), {}, None, [], {})
+        html = build_html(model, "", "/*RT_CSS*/", "/*RT_JS*/",
+                          leaflet_css="/*LEAFLET_CSS*/",
+                          leaflet_js="/*LEAFLET_JS*/", title="D")
+        self.assertIn("/*LEAFLET_CSS*/", html)
+        self.assertIn("/*LEAFLET_JS*/", html)
+        # leaflet CSS before runtime CSS; leaflet JS before runtime JS
+        self.assertLess(html.index("/*LEAFLET_CSS*/"), html.index("/*RT_CSS*/"))
+        self.assertLess(html.index("/*LEAFLET_JS*/"), html.index("/*RT_JS*/"))
+
 
 class XyzTemplateTest(unittest.TestCase):
     def test_osm_style_passthrough(self):

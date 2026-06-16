@@ -26,8 +26,9 @@ def _read_asset(name):
 
 
 def load_assets():
-    """Return ``(runtime_css, runtime_js)`` read from the bundled asset dir."""
-    return _read_asset("runtime.css"), _read_asset("runtime.js")
+    """Return ``(runtime_css, runtime_js, leaflet_css, leaflet_js)``."""
+    return (_read_asset("runtime.css"), _read_asset("runtime.js"),
+            _read_asset("leaflet.css"), _read_asset("leaflet.js"))
 
 
 def _escape_html(text):
@@ -48,8 +49,14 @@ def embed_json(model):
     return text
 
 
-def build_html(model, css_vars, runtime_css, runtime_js, title="Dashboard"):
-    """Return the complete ``index.html`` document as a string."""
+def build_html(model, css_vars, runtime_css, runtime_js,
+               leaflet_css="", leaflet_js="", title="Dashboard"):
+    """Return the complete ``index.html`` document as a string.
+
+    Leaflet's CSS is inlined before the runtime CSS, and its JS in a dedicated
+    ``<script>`` before the runtime ``<script>`` so ``L`` is defined when the
+    runtime executes.
+    """
     data_json = embed_json(model)
     parts = [
         "<!doctype html>",
@@ -60,6 +67,7 @@ def build_html(model, css_vars, runtime_css, runtime_js, title="Dashboard"):
         "<title>{}</title>".format(_escape_html(title)),
         "<style>",
         css_vars,
+        leaflet_css,
         runtime_css,
         "</style>",
         "</head>",
@@ -67,6 +75,9 @@ def build_html(model, css_vars, runtime_css, runtime_js, title="Dashboard"):
         '<div id="app"></div>',
         '<script type="application/json" id="dashboard-data">',
         data_json,
+        "</script>",
+        "<script>",
+        leaflet_js,
         "</script>",
         "<script>",
         runtime_js,

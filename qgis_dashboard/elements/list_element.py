@@ -45,6 +45,8 @@ class ListElement(DashboardElement):
         self.table.resizeColumnsToContents()
 
     def _on_row(self):
+        if not self._interactive:   # Build mode: row selection doesn't act
+            return
         rows = self.table.selectionModel().selectedRows()
         if not rows:
             return

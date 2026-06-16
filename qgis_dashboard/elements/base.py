@@ -47,6 +47,13 @@ class DashboardElement(QFrame):
         self.config = config or {}
         self.id = self.config.get("id") or uuid.uuid4().hex[:8]
         self.config["id"] = self.id
+        # content-interaction mode (Use vs Build): True == Use mode, contents
+        # react to the user (cross-filter clicks, map pan/identify); False ==
+        # Build mode, contents inert so tiles can be moved/resized/configured.
+        # The hosting GridTile drives this from the layout lock via
+        # ``set_interactive``; the initial value is overwritten when the tile is
+        # placed (DashboardCanvas.add_tile -> GridTile.set_locked).
+        self._interactive = True
         self.setObjectName("dashboardElement")
         self.setFrameShape(QFrame.Shape.StyledPanel)
         # full-bleed tiles fill edge-to-edge; their rectangular child is clipped
@@ -206,6 +213,20 @@ class DashboardElement(QFrame):
         if expr.hasEvalError():
             return None
         return val
+
+    # ---- interaction mode (Use vs Build) ----
+
+    def set_interactive(self, on):
+        """Enable/disable content interaction (Use mode vs Build mode).
+
+        In **Use mode** (``on=True``) the element's contents react to the user
+        (clicking a chart to cross-filter, selecting a list row, panning the
+        map). In **Build mode** (``on=False``) contents are inert so the user
+        can move / resize / configure tiles without firing filters. Presentational
+        elements need nothing; interactive elements (chart, pivot, list, selector,
+        text, map) override and act on the flag.
+        """
+        self._interactive = bool(on)
 
     # ---- bus reaction ----
 

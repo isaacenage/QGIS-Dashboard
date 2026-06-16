@@ -30,6 +30,12 @@ class CategorySelectorElement(DashboardElement):
         self.apply_theme()
         self.refresh()
 
+    def set_interactive(self, on):
+        # Build mode: disable the dropdown so it can't push a filter while the
+        # user is arranging tiles. Use mode: live.
+        super().set_interactive(on)
+        self.combo.setEnabled(bool(on))
+
     def refresh(self):
         # Repopulate values WITHOUT applying the dashboard filter, otherwise the
         # selector would filter itself down to one value.

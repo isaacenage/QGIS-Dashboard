@@ -74,6 +74,11 @@ class TextElement(DashboardElement):
     # ---- in-place editing ----
 
     def mouseDoubleClickEvent(self, event):
+        # Editing the text is a Build-mode action: in Use mode (locked) the tile
+        # is fixed, so a double-click does nothing.
+        if self._interactive:
+            super().mouseDoubleClickEvent(event)
+            return
         current = self.config.get("text", "")
         text, ok = QInputDialog.getMultiLineText(
             self, "Edit text", "Text:", current)

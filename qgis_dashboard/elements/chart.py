@@ -96,6 +96,8 @@ class ChartElement(DashboardElement):
         self._selected = None
 
     def _on_category(self, cat):
+        if not self._interactive:   # Build mode: clicks don't cross-filter
+            return
         if cat == "Other":
             return
         cat_field = self.config.get("category_field")

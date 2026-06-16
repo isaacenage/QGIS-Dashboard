@@ -147,6 +147,8 @@ class PivotElement(DashboardElement):
         return res is not None and row >= len(res.row_keys)
 
     def _on_cell(self, row, col):
+        if not self._interactive:   # Build mode: clicks don't cross-filter
+            return
         res = self._result
         if res is None or self._is_total_row(row):
             return
@@ -172,6 +174,8 @@ class PivotElement(DashboardElement):
         # clicks on a Total column do nothing
 
     def _on_header(self, idx):
+        if not self._interactive:   # Build mode: clicks don't cross-filter
+            return
         res = self._result
         if res is None or not res.col_keys:
             return

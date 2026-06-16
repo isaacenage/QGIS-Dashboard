@@ -9,12 +9,14 @@ as the user pans/zooms or toggles layers.
 The tile behaves differently in the two dashboard modes (driven by the layout
 lock via :meth:`set_interactive`):
 
-* **Build mode** (unlocked): a left-drag moves the host tile (the full-bleed map
-  has no title strip to grab). The map is inert — it mirrors the QGIS extent and
-  pushes no filter.
-* **Use mode** (locked): a left-**drag** pans the tile's own map; a left-**click**
-  (no drag) **identifies** the bound layer's feature under the cursor in a small
-  popup. Panning/zooming pushes a debounced spatial extent filter so connected
+* **Build mode** (unlocked): the hosting :class:`~dashboard_canvas.GridTile` owns
+  the mouse through its full-tile drag overlay (like every other tile), so a
+  left-drag anywhere on the map moves the tile and a right-click opens the tile
+  menu. The map itself is inert — it mirrors the QGIS extent and pushes no filter.
+* **Use mode** (locked): a left-**drag** pans the map (a ``QgsMapToolPan``) and a
+  left-**click** (no drag) **identifies** the bound layer's feature under the
+  cursor in a small popup. Panning/zooming pushes a debounced spatial extent
+  filter so connected
   tiles re-query to the visible frame (it is a filter **source**), and the map
   **flies** to the features matching its connected sources' filter (it is a
   fly-to **target**) — single feature → that feature's bounds, many → their union.
@@ -29,7 +31,7 @@ from html import escape
 
 from qgis.PyQt.QtCore import QTimer, Qt
 from qgis.PyQt.QtWidgets import QFrame, QVBoxLayout, QLabel
-from qgis.gui import QgsMapCanvas, QgsRubberBand
+from qgis.gui import QgsMapCanvas, QgsMapToolPan, QgsRubberBand
 from qgis.core import QgsFeatureRequest, QgsRectangle, NULL
 from .base import DashboardElement
 from .map_filter import extent_filter_expression
@@ -42,79 +44,44 @@ CLICK_THRESHOLD = 4
 IDENTIFY_TOL_PX = 6
 
 
-class _TileMapCanvas(QgsMapCanvas):
-    """Map mirror whose left button is mode-dependent.
+class _PanIdentifyTool(QgsMapToolPan):
+    """Use-mode map tool: a left-drag pans, a left-click (no drag) identifies.
 
-    In **Build mode** a left press/drag drives the host
-    :class:`~dashboard_canvas.GridTile` move API (the full-bleed map has no title
-    strip). In **Use mode** a left drag pans this canvas and a left click (no
-    drag) identifies a feature. Other buttons and the wheel always fall through
-    to QGIS's normal canvas behavior.
+    Panning is handled by :class:`QgsMapToolPan` (the canonical left-drag pan, so
+    the user no longer needs the middle mouse button); we only add the
+    click-to-identify on top. A press that moves less than ``CLICK_THRESHOLD`` px
+    before release counts as a click rather than a pan.
+
+    Build-mode moving is **not** handled here — the hosting ``GridTile``'s
+    full-tile drag overlay owns the mouse in Build mode, and this tool is only
+    installed while the tile is in Use mode (see ``MapElement.set_interactive``).
     """
 
-    def __init__(self, tile_getter, on_pan, on_identify, parent=None):
-        super().__init__(parent)
-        self._tile_getter = tile_getter   # callable -> the host GridTile or None
-        self._on_pan = on_pan             # callable(dx_px, dy_px) -> pan canvas
+    def __init__(self, canvas, on_identify):
+        super().__init__(canvas)
         self._on_identify = on_identify   # callable(local_QPoint) -> identify
-        self._mode = None       # "move" (build) | "pan" (use) | None
-        self._press = None      # press pos (global) for total-move detection
-        self._press_local = None   # press pos (local) for identify
-        self._last = None       # last global pos (incremental pan delta)
+        self._press = None      # press pos (canvas px) for click/drag detection
         self._moved = 0         # cumulative movement (px) since press
 
-    def _locked(self):
-        tile = self._tile_getter()
-        return tile is not None and tile.is_locked()
-
-    def mousePressEvent(self, e):
-        tile = self._tile_getter()
-        if e.button() == Qt.MouseButton.LeftButton and tile is not None:
-            self._press = e.globalPos()
-            self._press_local = e.pos()
-            self._last = e.globalPos()
+    def canvasPressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._press = e.pos()
             self._moved = 0
-            if self._locked():
-                self._mode = "pan"
-                self.setCursor(Qt.CursorShape.ClosedHandCursor)
-            else:
-                self._mode = "move"
-                tile.begin_move()
-            e.accept()
-            return
-        super().mousePressEvent(e)
+        super().canvasPressEvent(e)
 
-    def mouseMoveEvent(self, e):
-        if self._mode is not None:
-            delta = e.globalPos() - self._press
-            self._moved = max(self._moved, abs(delta.x()) + abs(delta.y()))
-            if self._mode == "move":
-                tile = self._tile_getter()
-                if tile is not None:
-                    tile.move_by(delta)
-            else:   # pan
-                step = e.globalPos() - self._last
-                self._last = e.globalPos()
-                self._on_pan(step.x(), step.y())
-            e.accept()
-            return
-        super().mouseMoveEvent(e)
+    def canvasMoveEvent(self, e):
+        if self._press is not None:
+            self._moved = max(self._moved,
+                              (e.pos() - self._press).manhattanLength())
+        super().canvasMoveEvent(e)
 
-    def mouseReleaseEvent(self, e):
-        if self._mode is not None and e.button() == Qt.MouseButton.LeftButton:
-            mode, moved = self._mode, self._moved
-            self._mode = None
-            if mode == "move":
-                tile = self._tile_getter()
-                if tile is not None:
-                    tile.end_move()
-            else:   # pan released; a near-zero move is a click -> identify
-                self.setCursor(Qt.CursorShape.OpenHandCursor)
-                if moved <= CLICK_THRESHOLD:
-                    self._on_identify(self._press_local)
-            e.accept()
-            return
-        super().mouseReleaseEvent(e)
+    def canvasReleaseEvent(self, e):
+        super().canvasReleaseEvent(e)   # let QgsMapToolPan finish the pan
+        click = (e.button() == Qt.MouseButton.LeftButton
+                 and self._press is not None and self._moved <= CLICK_THRESHOLD)
+        self._press = None
+        if click:
+            self._on_identify(e.pos())
 
 
 class IdentifyPopup(QFrame):
@@ -166,21 +133,21 @@ class MapElement(DashboardElement):
     accepts_filter = False    # never subsets its *displayed* layers
     is_filter_source = True   # the visible extent drives connected tiles
     full_bleed = True   # the canvas fills the tile: no title/description, no padding
-    handles_own_body_drag = True   # _TileMapCanvas drives the Build-mode move,
-                        # so keep the thin top drag strip (no full-tile overlay)
+    # handles_own_body_drag stays False (inherited): in Build mode the tile's
+    # full-tile drag overlay moves the map and routes its right-click menu, just
+    # like every other tile. Use-mode pan/identify run through _PanIdentifyTool.
 
     def __init__(self, bus, config=None, parent=None):
         super().__init__(bus, config, parent)
         # map tiles start inert; the hosting tile applies the real mode via
         # set_interactive once it is placed (honouring the layout lock).
         self._interactive = False
-        # left-drag behaviour is mode-dependent (see _TileMapCanvas); the
-        # GridTile sets `_grid_tile` on this element when it wraps it.
-        self.canvas = _TileMapCanvas(
-            lambda: getattr(self, "_grid_tile", None),
-            self._pan_pixels, self._identify_at)
-        self.canvas.setCursor(Qt.CursorShape.SizeAllCursor)
+        self.canvas = QgsMapCanvas()
         self.body.addWidget(self.canvas)
+        # Use-mode interaction tool: left-drag pans, left-click identifies. It is
+        # installed only while the tile is in Use mode (set_interactive); in Build
+        # mode the GridTile's drag overlay owns the mouse, so the map has no tool.
+        self._tool = _PanIdentifyTool(self.canvas, self._identify_at)
         self._rubber = None
         self._identify_popup = None
         # the last combined-source filter we flew to, so the map's own extent
@@ -201,6 +168,8 @@ class MapElement(DashboardElement):
             self._source.destinationCrsChanged.connect(self._sync_crs)
         # the tile's own extent (driven by Use-mode pan/zoom/fly) is what we push
         self.canvas.extentsChanged.connect(self._schedule_filter)
+        # any pan/zoom/fly moves the view out from under a popped identify result
+        self.canvas.extentsChanged.connect(self._dismiss_identify)
         # re-evaluate when the wiring graph changes (a target was (un)connected)
         self.bus.connectionsChanged.connect(self._schedule_filter)
         self.bus.featureAction.connect(self._zoom_to)
@@ -217,7 +186,8 @@ class MapElement(DashboardElement):
         self._filter_timer.stop()
         for sig, slot in ((self.bus.connectionsChanged, self._schedule_filter),
                           (self.bus.filtersChanged, self._fly_to_filtered),
-                          (self.canvas.extentsChanged, self._schedule_filter)):
+                          (self.canvas.extentsChanged, self._schedule_filter),
+                          (self.canvas.extentsChanged, self._dismiss_identify)):
             try:
                 sig.disconnect(slot)
             except (TypeError, RuntimeError):
@@ -249,17 +219,18 @@ class MapElement(DashboardElement):
 
     def set_interactive(self, on):
         super().set_interactive(on)
-        # cursor hint: open hand to pan in Use mode, move affordance in Build
-        self.canvas.setCursor(Qt.CursorShape.OpenHandCursor if on
-                              else Qt.CursorShape.SizeAllCursor)
         self._dismiss_identify()
         if on:
-            # entering Use mode: become a source (push current extent if wired)
+            # entering Use mode: install the pan/identify tool (left-drag pans,
+            # left-click identifies) and become a source (push extent if wired)
+            self.canvas.setMapTool(self._tool)
             self._schedule_filter()
             self._last_fly_expr = None
             self._fly_to_filtered()
         else:
-            # leaving Use mode: stop being a source and re-mirror the QGIS canvas
+            # leaving Use mode: drop the tool (the tile overlay takes the mouse),
+            # stop being a source and re-mirror the QGIS canvas
+            self.canvas.unsetMapTool(self._tool)
             self.bus.set_filter(self.id, None)
             self._last_fly_expr = None
             self._sync_extent(force=True)
@@ -319,26 +290,6 @@ class MapElement(DashboardElement):
         if self._interactive and not force:
             return
         self.canvas.setExtent(self._source.extent())
-        self.canvas.refresh()
-
-    # ---- Use-mode pan ----
-
-    def _pan_pixels(self, dx, dy):
-        """Shift the tile canvas extent by a screen-pixel drag delta.
-
-        Grab-and-drag pan: the map content follows the cursor, so dragging right
-        reveals the area to the west and dragging down reveals the area to the
-        north.
-        """
-        self._dismiss_identify()
-        w = self.canvas.width() or 1
-        h = self.canvas.height() or 1
-        ext = self.canvas.extent()
-        mu_x = ext.width() / w
-        mu_y = ext.height() / h
-        self.canvas.setExtent(QgsRectangle(
-            ext.xMinimum() - dx * mu_x, ext.yMinimum() + dy * mu_y,
-            ext.xMaximum() - dx * mu_x, ext.yMaximum() + dy * mu_y))
         self.canvas.refresh()
 
     # ---- Use-mode identify ----

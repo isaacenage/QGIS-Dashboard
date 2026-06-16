@@ -185,8 +185,8 @@ class GridTile(QFrame):
         super().__init__(canvas)
         self.canvas = canvas
         self.element = element
-        # back-reference so full-bleed elements (e.g. the map) can drive their
-        # own move via the tile API — see elements/map_element._TileMapCanvas
+        # back-reference so an element can reach its host tile (e.g. to drive its
+        # own move via the tile API) — kept as a general hook for full-bleed tiles
         setattr(element, "_grid_tile", self)
         self.x_px, self.y_px, self.w_px, self.h_px = pixel_rect
         self._prev = tuple(pixel_rect)

@@ -19,8 +19,8 @@ _FALLBACK = {
     "text": "#252b33", "text_muted": "#55606d", "accent": "#2b7de9",
     "border": "#e2e6ec", "chart_bg": "#ffffff", "grid_line": "#c4ccd4",
     "zebra": "#f6f8fb", "selection": "#e5e7eb",
-    "font_family": "Inter", "font_size": 11, "title_size": 13,
-    "value_size": 30, "radius": 12,
+    "font_family": "Inter", "heading_font": "", "font_size": 11,
+    "title_size": 13, "value_size": 30, "radius": 12,
 }
 
 
@@ -48,6 +48,19 @@ def _soft(hex_str, alpha=0.10):
 
 def font_stack(family):
     return '"{}", {}'.format(family or "Inter", FONT_FALLBACK)
+
+
+def heading_stack(heading, body):
+    """Heading stack: heading family, then body family, then safe fallbacks.
+
+    Mirrors :meth:`theme.Theme.heading_stack` so a missing heading font
+    degrades to the body font rather than the generic sans-serif.
+    """
+    head = heading or body or "Inter"
+    body = body or "Inter"
+    if head == body:
+        return font_stack(body)
+    return '"{}", "{}", {}'.format(head, body, FONT_FALLBACK)
 
 
 def theme_to_css_vars(theme):
@@ -78,6 +91,8 @@ def theme_to_css_vars(theme):
         "--title-size: {}px;".format(val("title_size")),
         "--value-size: {}px;".format(val("value_size")),
         "--font-family: {};".format(font_stack(val("font_family"))),
+        "--heading-family: {};".format(
+            heading_stack((theme or {}).get("heading_font"), val("font_family"))),
     ]
     for i, color in enumerate(series):
         lines.append("--series-{}: {};".format(i, color))

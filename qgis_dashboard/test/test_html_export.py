@@ -62,6 +62,15 @@ class BuildTileTest(unittest.TestCase):
         out = build_tile(tile)
         self.assertNotIn("indicator_value", out)
 
+    def test_indicator_icon_uri_passthrough(self):
+        tile = {"id": "i", "type": "indicator", "grid": {},
+                "icon_uri": "data:image/png;base64,ZZ",
+                "config": {"animation": "odometer", "value_size": 48}}
+        out = build_tile(tile)
+        self.assertEqual(out["icon_uri"], "data:image/png;base64,ZZ")
+        self.assertEqual(out["config"]["animation"], "odometer")
+        self.assertEqual(out["config"]["value_size"], 48)
+
 
 class BuildModelTest(unittest.TestCase):
     def _page(self):
@@ -108,6 +117,16 @@ class ThemeCssTest(unittest.TestCase):
         css = theme_to_css_vars({})
         self.assertIn("--accent: #2b7de9;", css)
         self.assertIn("Inter", css)
+
+    def test_heading_family_defaults_to_body(self):
+        css = theme_to_css_vars({"font_family": "Poppins"})
+        # No separate heading font -> heading stack collapses to the body stack.
+        self.assertIn('--heading-family: "Poppins",', css)
+
+    def test_heading_family_pairing_leads_with_heading(self):
+        css = theme_to_css_vars(
+            {"font_family": "Open Sans", "heading_font": "Playfair Display"})
+        self.assertIn('--heading-family: "Playfair Display", "Open Sans",', css)
 
 
 class HtmlBuilderTest(unittest.TestCase):

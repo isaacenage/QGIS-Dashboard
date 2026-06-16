@@ -36,7 +36,9 @@ _DEFAULTS = {
     "zebra": "#f6f8fb",       # alternating table row
     "selection": "#e5e7eb",   # selected table row / text selection
     "series": list(DEFAULT_SERIES),
-    "font_family": "Inter",   # bundled UI font (see fonts.py); falls back gracefully
+    "font_family": "Inter",   # bundled UI body font (see fonts.py); falls back gracefully
+    "heading_font": "",       # optional heading/display family (titles + indicator
+                              # value). Empty == reuse font_family (no pairing).
     "font_size": 11,
     "title_size": 13,
     "value_size": 30,         # indicator big number
@@ -46,7 +48,8 @@ _DEFAULTS = {
 # Keys a per-element override is allowed to set (a tile can't move the window).
 OVERRIDE_KEYS = (
     "surface_bg", "text", "text_muted", "accent", "chart_bg",
-    "series", "font_family", "font_size", "title_size", "value_size",
+    "series", "font_family", "heading_font", "font_size", "title_size",
+    "value_size",
 )
 
 
@@ -108,12 +111,30 @@ class Theme(object):
     _FONT_FALLBACK = '"Segoe UI", "Helvetica Neue", Arial, sans-serif'
 
     def font_stack(self):
-        """The CSS font-family stack: the chosen family then safe fallbacks."""
+        """The CSS font-family stack: the chosen body family then safe fallbacks."""
         fam = self.font_family or "Inter"
         return '"{}", {}'.format(fam, self._FONT_FALLBACK)
 
+    def heading_family(self):
+        """The resolved heading family name (falls back to the body family)."""
+        return self.heading_font or self.font_family or "Inter"
+
+    def heading_stack(self):
+        """CSS stack for headings: heading family, then the body family, then
+        safe fallbacks — so a missing heading font degrades to the body font."""
+        head = self.heading_font or self.font_family or "Inter"
+        body = self.font_family or "Inter"
+        if head == body:
+            return self.font_stack()
+        return '"{}", "{}", {}'.format(head, body, self._FONT_FALLBACK)
+
     def _font_rule(self, size=None):
         fam = "font-family:{};".format(self.font_stack())
+        sz = "font-size:{}px;".format(size) if size else ""
+        return fam + sz
+
+    def _heading_rule(self, size=None):
+        fam = "font-family:{};".format(self.heading_stack())
         sz = "font-size:{}px;".format(size) if size else ""
         return fam + sz
 
@@ -143,6 +164,7 @@ QToolButton#dashRailButton {{
 }}
 QToolButton#dashRailButton:hover {{ background:{brand_soft}; border-color:{border}; }}
 QToolButton#dashRailButton:pressed {{ background:{selection}; }}
+QToolButton#dashRailButton:checked {{ background:{brand_soft}; border-color:{accent}; }}
 QToolButton#dashRailButton:focus {{ border-color:{accent}; }}
 
 /* Status bar ------------------------------------------------------------- */
@@ -151,8 +173,12 @@ QStatusBar::item {{ border:none; }}
 #dashFilterStatus {{ color:{muted}; {small_font} background:transparent; }}
 #dashFilterDot {{ background:{accent}; border-radius:4px; }}
 
-/* Page tabs (bottom-accent underline) ------------------------------------ */
-QTabBar {{ background:{chrome_bg}; }}
+/* Page tab strip (tab bar + lock/export buttons) ------------------------- */
+/* The single soft hairline lives on the whole strip — matching the rail's
+   border, never a heavy/dark outline — so it spans under the buttons too. The
+   native tab-bar base line is disabled in code (QTabBar.setDrawBase(False)). */
+#dashTabStrip {{ background:{chrome_bg}; border-bottom:1px solid {border}; }}
+QTabBar {{ background:transparent; }}
 QTabBar::tab {{
     background:transparent; color:{muted}; padding:8px 16px; margin-right:2px;
     border:none; border-bottom:3px solid transparent; font-weight:500;
@@ -164,8 +190,12 @@ QTabBar::tab:selected {{
     border-top-left-radius:8px; border-top-right-radius:8px;
 }}
 QStackedWidget {{ background:{chrome_bg}; }}
-QScrollArea {{ background:{window_bg}; border:none; }}
-#dashCanvas {{ background:{window_bg}; }}
+/* Generic scroll areas (dialogs, lists, ...) stay transparent so they inherit
+   their container's chrome — the *canvas background* must never leak into them. */
+QScrollArea {{ background:transparent; border:none; }}
+/* The canvas drawing-area background is scoped to the canvas and the page view
+   that holds it (so overflow when zoomed/panned matches the canvas), nowhere else. */
+#dashPageView, #dashCanvas {{ background:{window_bg}; }}
 
 /* Tiles ------------------------------------------------------------------ */
 #dashboardElement {{
@@ -176,14 +206,15 @@ QScrollArea {{ background:{window_bg}; border:none; }}
    rectangular child aligns with the frame, and no inner background bleed. */
 #dashboardElement[fullBleed="true"] {{ border-radius:0; }}
 #tileHeader {{ background:transparent; }}
-#tileTitle {{ color:{text}; {title_font} font-weight:600; }}
+#tileTitle {{ color:{text}; {heading_font} font-weight:600; }}
 #tileClose {{ color:{muted}; border:none; background:transparent; }}
 #tileClose:hover {{ color:{accent}; }}
-#elementTitle {{ color:{text}; {title_font} font-weight:600; }}
+#elementTitle {{ color:{text}; {heading_font} font-weight:600; }}
 #elementDescription {{ color:{muted}; {small_font} }}
-#indValue {{ color:{accent}; font-size:{value_size}px; font-weight:700; }}
+#indValue {{ color:{accent}; font-family:{heading_stack}; font-size:{value_size}px; font-weight:700; }}
 #indTop, #indBottom {{ color:{muted}; {small_font} }}
 QLabel {{ color:{text}; {base_font} background:transparent; }}
+QLabel[connHint="true"] {{ color:{muted}; {small_font} }}
 
 /* Buttons ---------------------------------------------------------------- */
 QPushButton {{
@@ -233,6 +264,28 @@ QComboBox QAbstractItemView {{
 QToolButton {{ color:{text}; }}
 QCheckBox, QRadioButton {{ color:{text}; {base_font} background:transparent; }}
 
+/* Sliders (e.g. the global corner-radius control) ------------------------ */
+QSlider::groove:horizontal {{
+    height:4px; border-radius:2px; background:{border};
+}}
+QSlider::sub-page:horizontal {{ background:{accent}; border-radius:2px; }}
+QSlider::handle:horizontal {{
+    background:{accent}; border:2px solid {chrome_bg}; width:14px; height:14px;
+    margin:-6px 0; border-radius:9px;
+}}
+QSlider::handle:horizontal:hover {{ background:{accent_hover}; }}
+
+/* Group boxes (themed surface + hairline, never the dark app palette) ----- */
+QGroupBox {{
+    background:{surface_bg}; border:1px solid {border}; border-radius:10px;
+    margin-top:14px; padding:14px 12px 10px 12px; {base_font} font-weight:600;
+    color:{text};
+}}
+QGroupBox::title {{
+    subcontrol-origin:margin; subcontrol-position:top left; left:12px;
+    padding:0 6px; color:{muted}; background:{chrome_bg};
+}}
+
 /* Tables and lists ------------------------------------------------------- */
 QTableWidget, QTableView {{
     background:{surface_bg}; color:{text}; gridline-color:{border};
@@ -250,11 +303,11 @@ QListWidget::item:selected, QTreeWidget::item:selected {{
     background:{selection}; color:{text};
 }}
 QHeaderView::section {{
-    background:{window_bg}; color:{text}; padding:6px 10px;
+    background:{zebra}; color:{text}; padding:6px 10px;
     border:none; border-right:1px solid {border}; border-bottom:1px solid {border};
     font-weight:600;
 }}
-QTableCornerButton::section {{ background:{window_bg}; border:none; }}
+QTableCornerButton::section {{ background:{zebra}; border:none; }}
 
 /* Scrollbars (slim, rounded) --------------------------------------------- */
 QScrollBar:vertical {{ background:transparent; width:12px; margin:2px; }}
@@ -274,7 +327,7 @@ QScrollBar::add-page, QScrollBar::sub-page {{ background:transparent; }}
 QSplitter::handle {{ background:{border}; }}
 QMenu {{ background:{surface_bg}; color:{text}; border:1px solid {border};
     border-radius:8px; padding:4px; }}
-QMenu::item {{ padding:6px 18px; border-radius:6px; }}
+QMenu::item {{ padding:6px 18px; border-radius:6px; color:{text}; }}
 QMenu::item:selected {{ background:{brand_soft}; color:{accent}; }}
 QToolTip {{
     background:#111827; color:#ffffff; border:none; border-radius:6px;
@@ -287,7 +340,8 @@ QToolTip {{
             accent_hover=self._accent_hover(), zebra=self.zebra,
             selection=self.selection, brand_soft=self._brand_soft(),
             value_size=self.value_size, font_family=self.font_stack(),
-            title_font=self._font_rule(self.title_size),
+            heading_stack=self.heading_stack(),
+            heading_font=self._heading_rule(self.title_size),
             small_font=self._font_rule(11),
             base_font=self._font_rule(self.font_size),
         )
@@ -313,12 +367,12 @@ QToolTip {{
         """Per-tile override stylesheet (scoped to one tile via objectName)."""
         return """
 #dashboardElement {{ background:{surface_bg}; }}
-#elementTitle, #tileTitle {{ color:{text}; {title_font} font-weight:600; }}
-#indValue {{ color:{accent}; font-size:{value_size}px; font-weight:700; }}
+#elementTitle, #tileTitle {{ color:{text}; {heading_font} font-weight:600; }}
+#indValue {{ color:{accent}; font-family:{heading_stack}; font-size:{value_size}px; font-weight:700; }}
 QLabel {{ color:{text}; {base_font} }}
 """.format(
             surface_bg=self.surface_bg, text=self.text, accent=self.accent,
-            value_size=self.value_size,
-            title_font=self._font_rule(self.title_size),
+            value_size=self.value_size, heading_stack=self.heading_stack(),
+            heading_font=self._heading_rule(self.title_size),
             base_font=self._font_rule(self.font_size),
         )

@@ -54,15 +54,15 @@ html, body {
   padding: 10px;
 }
 .dash-grid {
-  display: grid;
-  gap: 10px;
-  width: 100%;
-  height: 100%;
+  position: relative;
+  margin: 0 auto;
   min-height: 360px;
 }
 
 /* ---- tiles -------------------------------------------------------------- */
 .dash-tile {
+  position: absolute;
+  box-sizing: border-box;
   background: var(--surface-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -76,6 +76,7 @@ html, body {
 .dash-tile.full-bleed { padding: 0; border-radius: var(--radius); }
 .dash-tile-title {
   color: var(--text);
+  font-family: var(--heading-family, var(--font-family));
   font-size: var(--title-size);
   font-weight: 600;
   margin: 0 0 6px 0;
@@ -90,8 +91,16 @@ html, body {
 .dash-indicator { display: flex; flex-direction: column; align-items: center;
   justify-content: center; height: 100%; text-align: center; }
 .dash-ind-top { color: var(--muted); font-size: 11px; }
-.dash-ind-value { color: var(--accent); font-size: var(--value-size);
-  font-weight: 700; line-height: 1.1; }
+.dash-ind-valuewrap { display: flex; align-items: center; justify-content: center;
+  gap: 10px; }
+.dash-ind-valuewrap.pos-right { flex-direction: row-reverse; }
+.dash-ind-valuewrap.pos-top { flex-direction: column; }
+.dash-ind-icon { object-fit: contain; display: block; flex: 0 0 auto; }
+.dash-ind-value { color: var(--accent);
+  font-family: var(--heading-family, var(--font-family));
+  font-size: var(--value-size); font-weight: 700; line-height: 1.1; }
+.dash-ind-value.fade-in { animation: dash-ind-fade 0.6s ease-out; }
+@keyframes dash-ind-fade { from { opacity: 0; } to { opacity: 1; } }
 .dash-ind-bottom { color: var(--muted); font-size: 11px; }
 .dash-ind-bottom.up { color: #13a10e; }
 .dash-ind-bottom.down { color: #d13438; }

@@ -86,6 +86,44 @@ ICONS = {
         '<path d="M12 5.25V18.75C15.7279 18.75 18.75 15.7279 18.75 12C18.75 8.27208 '
         '15.7279 5.25 12 5.25Z" fill="#000"/>'
         '</svg>'),
+    # style guide / open appearance (Fluent "style guide" glyph) — tinted
+    "style_guide": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#000">'
+        '<path d="M14.0358344,2.77749671 C15.5028662,2.38440673 17.0107928,3.25500857 '
+        '17.4038828,4.72204036 L20.1214828,14.8642615 C20.5145728,16.3312933 '
+        '19.6439709,17.8392199 18.1769391,18.2323099 L11.8984213,19.9146337 '
+        'C10.4313895,20.3077237 8.92346284,19.4371219 8.53037286,17.9700901 '
+        'L5.81277289,7.8278689 C5.41968291,6.36083711 6.29028475,4.85291048 '
+        '7.75731654,4.4598205 L14.0358344,2.77749671 Z M5.80276379,11.6579669 '
+        'L7.56444704,18.2289091 C7.74541549,18.9042926 8.09965838,19.4869754 '
+        '8.56653105,19.9419445 L8.12368161,19.9181345 C6.60697998,19.8386475 '
+        '5.4418873,18.544681 5.52137427,17.0279794 L5.80276379,11.6579669 Z '
+        'M14.424063,4.22638545 L8.1455451,5.90870924 C7.47871248,6.08738651 '
+        '7.08298436,6.7728077 7.26166163,7.43964033 L9.9792616,17.5818615 '
+        'C10.1579389,18.2486941 10.8433601,18.6444222 11.5101927,18.465745 '
+        'L17.7887106,16.7834212 C18.4555432,16.6047439 18.8512713,15.9193227 '
+        '18.672594,15.2524901 L15.9549941,5.11026892 C15.7763168,4.44343629 '
+        '15.0908956,4.04770818 14.424063,4.22638545 Z M4.87817105,10.1797973 '
+        'L4.52274473,16.9756434 C4.4861276,17.6743399 4.64319766,18.3383733 '
+        '4.94700819,18.915604 L4.53260907,18.7550052 C3.11470293,18.210722 '
+        '2.40649159,16.6200533 2.95077476,15.2021471 L4.87817105,10.1797973 Z '
+        'M9.74118095,7.03407417 C10.2746471,6.89113236 10.822984,7.20771485 '
+        '10.9659258,7.74118095 C11.1088676,8.27464706 10.7922851,8.82298401 '
+        '10.258819,8.96592583 C9.72535294,9.10886764 9.17701599,8.79228515 '
+        '9.03407417,8.25881905 C8.89113236,7.72535294 9.20771485,7.17701599 '
+        '9.74118095,7.03407417 Z"/>'
+        '</svg>'),
+    # layout (2x2 grid of tiles) — Settings nav glyph
+    "layout": _stroke(
+        '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/>'
+        '<rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/>'
+        '<rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/>'
+        '<rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>'),
+    # info (circled "i") — Settings "About" nav glyph
+    "info": _stroke(
+        '<circle cx="12" cy="12" r="9"/>'
+        '<line x1="12" y1="11" x2="12" y2="16"/>'
+        '<circle cx="12" cy="7.8" r="0.4"/>'),
     # clear the active cross-filter (funnel + slash)
     "clear_filter": _stroke(
         '<path d="M3 4h18l-7 8.2V19l-4 2v-8.8z"/>'
@@ -121,6 +159,42 @@ ICONS = {
         '<line x1="20.5" y1="20.5" x2="16" y2="16"/>'
         '<line x1="8" y1="11" x2="14" y2="11"/>'
         '<line x1="11" y1="8" x2="11" y2="14"/>'),
+    # export / share (box with an arrow leaving it) — tinted to one color
+    "export": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
+        'stroke="#000" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
+        '<path d="M13 11L21.2 2.80005"/>'
+        '<path d="M22 6.8V2H17.2"/>'
+        '<path d="M11 2H9C4 2 2 4 2 9V15C2 20 4 22 9 22H15C20 22 22 20 22 15V13"/>'
+        '</svg>'),
+    # layout locked (closed padlock) — tinted to one color
+    "lock": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#000">'
+        '<path fill-rule="evenodd" clip-rule="evenodd" d="M5.25 10.0546V8C5.25 '
+        '4.27208 8.27208 1.25 12 1.25C15.7279 1.25 18.75 4.27208 18.75 8V10.0546C19.8648 '
+        '10.1379 20.5907 10.348 21.1213 10.8787C22 11.7574 22 13.1716 22 16C22 18.8284 '
+        '22 20.2426 21.1213 21.1213C20.2426 22 18.8284 22 16 22H8C5.17157 22 3.75736 22 '
+        '2.87868 21.1213C2 20.2426 2 18.8284 2 16C2 13.1716 2 11.7574 2.87868 '
+        '10.8787C3.40931 10.348 4.13525 10.1379 5.25 10.0546ZM6.75 8C6.75 5.10051 9.10051 '
+        '2.75 12 2.75C14.8995 2.75 17.25 5.10051 17.25 8V10.0036C16.867 10 16.4515 10 16 '
+        '10H8C7.54849 10 7.13301 10 6.75 10.0036V8ZM14 16C14 17.1046 13.1046 18 12 '
+        '18C10.8954 18 10 17.1046 10 16C10 14.8954 10.8954 14 12 14C13.1046 14 14 14.8954 '
+        '14 16Z"/>'
+        '</svg>'),
+    # layout unlocked (open padlock) — tinted to one color
+    "unlock": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#000">'
+        '<path fill-rule="evenodd" clip-rule="evenodd" d="M6.75 8C6.75 5.10051 9.10051 '
+        '2.75 12 2.75C14.4453 2.75 16.5018 4.42242 17.0846 6.68694C17.1879 7.08808 '
+        '17.5968 7.32957 17.9979 7.22633C18.3991 7.12308 18.6405 6.7142 18.5373 '
+        '6.31306C17.788 3.4019 15.1463 1.25 12 1.25C8.27208 1.25 5.25 4.27208 5.25 '
+        '8V10.0546C4.13525 10.1379 3.40931 10.348 2.87868 10.8787C2 11.7574 2 13.1716 2 '
+        '16C2 18.8284 2 20.2426 2.87868 21.1213C3.75736 22 5.17157 22 8 22H16C18.8284 22 '
+        '20.2426 22 21.1213 21.1213C22 20.2426 22 18.8284 22 16C22 13.1716 22 11.7574 '
+        '21.1213 10.8787C20.2426 10 18.8284 10 16 10H8C7.54849 10 7.13301 10 6.75 '
+        '10.0036V8ZM14 16C14 17.1046 13.1046 18 12 18C10.8954 18 10 17.1046 10 16C10 '
+        '14.8954 10.8954 14 12 14C13.1046 14 14 14.8954 14 16Z"/>'
+        '</svg>'),
 }
 
 
@@ -177,12 +251,12 @@ def _render_px(svg_text, logical_size, tint=None, supersample=1):
     """
     size = max(1, int(round(logical_size * supersample)))
     px = QPixmap(size, size)
-    px.fill(Qt.transparent)
+    px.fill(Qt.GlobalColor.transparent)
     if _HAS_SVG:
         renderer = QSvgRenderer(QByteArray(svg_text.encode("utf-8")))
         painter = QPainter(px)
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         vb = renderer.viewBoxF()
         if vb.isValid() and vb.width() > 0 and vb.height() > 0:
             scale = min(size / vb.width(), size / vb.height())
@@ -192,7 +266,7 @@ def _render_px(svg_text, logical_size, tint=None, supersample=1):
         else:
             renderer.render(painter)
         if tint is not None:
-            painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
             painter.fillRect(px.rect(), QColor(tint))
         painter.end()
     if supersample != 1:

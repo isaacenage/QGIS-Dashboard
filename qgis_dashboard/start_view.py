@@ -328,11 +328,11 @@ class StartView(QWidget):
         cards = []
         if self._can_continue:
             cont = _ActionCard(
-                self._theme, "start_continue", "Continue current dashboard")
+                self._theme, "layout", "Continue current dashboard")
             cont.clicked.connect(self.continueRequested.emit)
             cards.append(cont)
         new_card = _ActionCard(
-            self._theme, "start_new", "New Dashboard")
+            self._theme, "add_page", "New Dashboard")
         new_card.clicked.connect(self.newRequested.emit)
         cards.append(new_card)
         open_card = _ActionCard(

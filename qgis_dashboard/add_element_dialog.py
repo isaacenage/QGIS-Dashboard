@@ -23,7 +23,9 @@ from qgis.PyQt.QtGui import QFont
 from qgis.gui import QgsMapLayerComboBox, QgsFieldComboBox
 from qgis.core import QgsMapLayerProxyModel
 from .elements import ELEMENT_LABELS
-from .elements.chart_specs import CHART_SPECS, CHART_TYPE_ORDER
+from .elements.chart_specs import (
+    CHART_SPECS, CHART_TYPE_ORDER, DEFAULT_CHART_TYPE, shape_of,
+)
 from .form_util import compact_form, no_horizontal_scroll, shrink_combo
 
 # element types that bind to no vector layer (the Layer row is hidden for them)
@@ -109,6 +111,14 @@ class ElementConfigForm(QWidget):
 
         # dynamic rows live in this dict so we can clear them on type change
         self._dyn = {}
+        # non-config rows (e.g. the header's "Banner height", which edits the
+        # tile's geometry rather than the element config) — tracked separately
+        # so they are NOT reported by result_config()/managed_keys().
+        self._extra_rows = []
+        self.banner_height_spin = None
+        # the chart section's field rows depend on the selected chart_type; this
+        # holds the type across a rebuild so switching it keeps the selection.
+        self._pending_chart_type = None
 
         if element is not None:
             idx = self.type_combo.findData(element.type_name)
@@ -116,6 +126,8 @@ class ElementConfigForm(QWidget):
                 self.type_combo.setCurrentIndex(idx)
             self.type_combo.setEnabled(False)   # type is fixed when editing
             self.title_edit.setText(element.config.get("title", ""))
+            if element.type_name == "chart":
+                self._pending_chart_type = element.config.get("chart_type")
             lyr = element.layer()
             if lyr is not None:
                 self.layer_combo.setLayer(lyr)
@@ -131,12 +143,14 @@ class ElementConfigForm(QWidget):
         return s
 
     def _clear_dynamic(self):
-        for w in self._dyn.values():
+        for w in list(self._dyn.values()) + self._extra_rows:
             lbl = self.form.labelForField(w)
             if lbl:
                 lbl.deleteLater()
             w.deleteLater()
         self._dyn = {}
+        self._extra_rows = []
+        self.banner_height_spin = None
 
     def _add_dyn(self, key, label, widget):
         # combos (incl. field/font pickers) would otherwise size to their
@@ -219,6 +233,7 @@ class ElementConfigForm(QWidget):
             slot.addItem("Below title", "below")
             self._add_dyn("logo_slot", "Logo position", slot)
             self._add_dyn("logo_size", "Logo size (px)", self._spin(12, 400, 40))
+            self._add_banner_height()
         elif t == "indicator":
             self._add_dyn("value_expression", "Value expression",
                           QLineEdit("count(1)"))
@@ -255,11 +270,12 @@ class ElementConfigForm(QWidget):
             for key in CHART_TYPE_ORDER:
                 combo.addItem(CHART_SPECS[key]["label"], key)
             self._add_dyn("chart_type", "Chart type", combo)
-            self._add_dyn("category_field", "Category field", self._field_combo())
-            stat = QComboBox()
-            stat.addItems(["count", "sum", "mean"])
-            self._add_dyn("statistic", "Statistic", stat)
-            self._add_dyn("value_field", "Value field (sum/mean)", self._field_combo())
+            ct = self._pending_chart_type or DEFAULT_CHART_TYPE
+            i = combo.findData(ct)
+            if i >= 0:
+                combo.setCurrentIndex(i)
+            combo.currentIndexChanged.connect(self._on_chart_type_changed)
+            self._add_chart_rows(combo.currentData())
         elif t == "pivot":
             self._add_dyn("row_field", "Row field", self._field_combo())
             self._add_dyn("col_field", "Column field (optional)",
@@ -276,6 +292,88 @@ class ElementConfigForm(QWidget):
             self._add_dyn("category_field", "Category field", self._field_combo())
         elif t == "list":
             self._add_dyn("display_fields", "Fields (comma sep)", QLineEdit(""))
+
+    def _on_chart_type_changed(self):
+        """Rebuild the chart field rows for the newly-selected chart type.
+
+        Field selections that survive the shape change (e.g. ``category_field``)
+        are preserved by snapshotting the dynamic values and restoring them after
+        the rebuild.
+        """
+        combo = self._dyn.get("chart_type")
+        if combo is None:
+            return
+        new_type = combo.currentData()
+        if new_type == self._pending_chart_type:
+            return                       # no real change (e.g. reload echo)
+        self._pending_chart_type = new_type
+        snapshot = self._dynamic_values()
+        self._rebuild()
+        self._load_values(snapshot)
+        self.changed.emit()
+
+    def _add_chart_stat_value(self):
+        stat = QComboBox()
+        stat.addItems(["count", "sum", "mean"])
+        self._add_dyn("statistic", "Statistic", stat)
+        self._add_dyn("value_field", "Value field (sum/mean)", self._field_combo())
+
+    def _add_chart_rows(self, chart_type):
+        """Add the field rows a chart type's data shape needs."""
+        shape = shape_of(chart_type)
+        if shape == "category":
+            self._add_dyn("category_field", "Category field", self._field_combo())
+            self._add_chart_stat_value()
+        elif shape == "series":
+            self._add_dyn("category_field", "Category field", self._field_combo())
+            self._add_dyn("series_field", "Series field", self._field_combo())
+            self._add_chart_stat_value()
+        elif shape == "xy":
+            self._add_dyn("x_field", "X field (numeric)", self._field_combo())
+            self._add_dyn("y_field", "Y field (numeric)", self._field_combo())
+        elif shape == "xyz":
+            self._add_dyn("x_field", "X field (numeric)", self._field_combo())
+            self._add_dyn("y_field", "Y field (numeric)", self._field_combo())
+            self._add_dyn("size_field", "Size field (numeric)", self._field_combo())
+        elif shape == "bins":
+            self._add_dyn("value_field", "Value field (numeric)", self._field_combo())
+            self._add_dyn("bin_count", "Number of bins", self._spin(2, 50, 10))
+        elif shape == "ohlc":
+            self._add_dyn("category_field", "Category (x) field", self._field_combo())
+            self._add_dyn("open_field", "Open field", self._field_combo())
+            self._add_dyn("high_field", "High field", self._field_combo())
+            self._add_dyn("low_field", "Low field", self._field_combo())
+            self._add_dyn("close_field", "Close field", self._field_combo())
+
+    def _add_banner_height(self):
+        """Add the header's "Banner height" row when configuring a live tile.
+
+        The header is an ordinary canvas tile, so its height is tile geometry,
+        not element config. This spinner writes straight to the tile's pixel
+        height (seeded from it) — a numeric stand-in for dragging the tile's
+        resize handle. It is only shown when editing an existing header tile (it
+        needs a tile to read/resize); it is *not* a managed config key, so
+        result_config()/managed_keys() ignore it.
+        """
+        tile = getattr(self._element, "_grid_tile", None) if self._element else None
+        if tile is None:
+            return
+        spin = QSpinBox()
+        spin.setRange(40, 4000)
+        spin.setSingleStep(10)
+        spin.setSuffix(" px")
+        try:
+            spin.setValue(int(tile.grid_rect()[3]))
+        except (TypeError, ValueError, IndexError):
+            pass
+        spin.valueChanged.connect(lambda *_: self.changed.emit())
+        self.banner_height_spin = spin
+        self._extra_rows.append(spin)
+        self.form.addRow("Banner height", spin)
+
+    def banner_height(self):
+        """The chosen banner height in px, or ``None`` when no row is shown."""
+        return self.banner_height_spin.value() if self.banner_height_spin else None
 
     def _on_layer(self, _lyr):
         for w in self._dyn.values():
@@ -323,34 +421,48 @@ class ElementConfigForm(QWidget):
         keys.update({"title", "layer_id"})
         return keys
 
+    def _dynamic_values(self, drop_empty=True):
+        """Snapshot the current dynamic-row values keyed by config key.
+
+        With *drop_empty* an empty QLineEdit drops its key (matching the
+        configure-edit "cleared field removes the key" contract); the chart
+        rebuild snapshot passes ``drop_empty=False`` so a partly-filled form is
+        restored verbatim across a chart-type switch.
+        """
+        out = {}
+        for key, w in self._dyn.items():
+            if isinstance(w, QgsFieldComboBox):
+                out[key] = w.currentField()
+            elif isinstance(w, QCheckBox):
+                out[key] = w.isChecked()
+            elif isinstance(w, QSpinBox):
+                out[key] = w.value()
+            elif isinstance(w, QFontComboBox):
+                # QFontComboBox subclasses QComboBox — must precede it here
+                out[key] = w.currentFont().family()
+            elif isinstance(w, QComboBox):
+                data = w.currentData()
+                out[key] = data if data is not None else w.currentText()
+            elif isinstance(w, _PathPicker):
+                out[key] = w.path()
+            elif isinstance(w, QPlainTextEdit):
+                out[key] = w.toPlainText()
+            elif isinstance(w, QLineEdit):
+                val = w.text().strip()
+                if val:
+                    out[key] = ([s.strip() for s in val.split(",")]
+                                if key == "display_fields" else val)
+                elif not drop_empty:
+                    out[key] = ""
+        return out
+
     def result_config(self):
         t = self.type_combo.currentData()
         cfg = {"title": self.title_edit.text() or ELEMENT_LABELS[t]}
         lyr = self.layer_combo.currentLayer()
         if lyr:
             cfg["layer_id"] = lyr.id()
-        for key, w in self._dyn.items():
-            if isinstance(w, QgsFieldComboBox):
-                cfg[key] = w.currentField()
-            elif isinstance(w, QCheckBox):
-                cfg[key] = w.isChecked()
-            elif isinstance(w, QSpinBox):
-                cfg[key] = w.value()
-            elif isinstance(w, QFontComboBox):
-                # QFontComboBox subclasses QComboBox — must precede it here
-                cfg[key] = w.currentFont().family()
-            elif isinstance(w, QComboBox):
-                data = w.currentData()
-                cfg[key] = data if data is not None else w.currentText()
-            elif isinstance(w, _PathPicker):
-                cfg[key] = w.path()
-            elif isinstance(w, QPlainTextEdit):
-                cfg[key] = w.toPlainText()
-            elif isinstance(w, QLineEdit):
-                val = w.text().strip()
-                if val:
-                    cfg[key] = ([s.strip() for s in val.split(",")]
-                                if key == "display_fields" else val)
+        cfg.update(self._dynamic_values())
         return t, cfg
 
 
@@ -384,6 +496,9 @@ class AddElementDialog(QDialog):
 
     def managed_keys(self):
         return self._form.managed_keys()
+
+    def banner_height(self):
+        return self._form.banner_height()
 
     def result_config(self):
         return self._form.result_config()

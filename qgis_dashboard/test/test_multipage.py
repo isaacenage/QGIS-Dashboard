@@ -551,6 +551,53 @@ class WindowHeaderTest(unittest.TestCase):
         other_types = [t.element.type_name for t in other.canvas.tiles()]
         self.assertNotIn("header", other_types)
 
+    def test_header_banner_height_control(self):
+        """The header Configure form exposes a Banner height row that drives the
+        tile's pixel height (geometry), never the element config."""
+        from add_element_dialog import ElementConfigForm
+        win = self._win()
+        win.add_element("header", {"title": "Brand"})
+        tile = next(t for t in win.current_page().canvas.tiles()
+                    if t.element.type_name == "header")
+        start_h = tile.grid_rect()[3]
+
+        # the form surfaces a Banner height row seeded from the tile geometry
+        form = ElementConfigForm(element=tile.element)
+        self.assertIsNotNone(form.banner_height_spin)
+        self.assertEqual(form.banner_height(), start_h)
+        # height is geometry, not config — it must not leak into the config dict
+        self.assertNotIn("banner_height", form.managed_keys())
+        _t, cfg = form.result_config()
+        self.assertNotIn("banner_height", cfg)
+        self.assertNotIn("height", cfg)
+
+        # applying a height resizes the tile exactly (taller, then a thin band —
+        # no MIN_TILE floor, so banners shorter than a normal tile are allowed)
+        self.assertTrue(tile.set_height_px(start_h + 120))
+        self.assertEqual(tile.grid_rect()[3], start_h + 120)
+        self.assertTrue(tile.set_height_px(64))
+        self.assertEqual(tile.grid_rect()[3], 64)
+
+    def test_header_height_pushes_tiles_below(self):
+        """Growing the banner pushes every tile below it down by the delta
+        (accordion), and shrinking pulls them back up — never reverting."""
+        win = self._win()
+        win.add_element("header", {"title": "Brand"})       # lands at (0,0,w,80)
+        win.add_element("text", {"title": "Body"})           # lands below the band
+        canvas = win.current_page().canvas
+        header = next(t for t in canvas.tiles() if t.element.type_name == "header")
+        below = next(t for t in canvas.tiles() if t.element.type_name == "text")
+        hx, hy, hw, hh = header.grid_rect()
+        by = below.grid_rect()[1]
+        self.assertGreaterEqual(by, hy + hh)                 # it really is below
+
+        # grow the banner by 100 → the tile below slides down by exactly 100
+        header.set_height_px(hh + 100)
+        self.assertEqual(below.grid_rect()[1], by + 100)
+        # shrink back → the tile returns to its original row (push reversed)
+        header.set_height_px(hh)
+        self.assertEqual(below.grid_rect()[1], by)
+
 
 class ThemeChromeTest(unittest.TestCase):
     def test_default_chrome_is_white(self):

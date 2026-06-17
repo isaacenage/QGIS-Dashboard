@@ -435,6 +435,41 @@ class GridTile(QFrame):
         else:
             self.canvas.place(self)   # snap back to current pixel rect
 
+    def set_height_px(self, h):
+        """Resize the tile to logical height *h* px, keeping its origin/width.
+
+        A numeric stand-in for dragging the south edge, used by the header
+        tile's "Banner height" config control. Unlike a handle drag it keeps the
+        **exact** height (no grid snap, no :data:`MIN_TILE` floor) — a banner is
+        meant to be a thin band, often shorter than a normal tile — clamped only
+        by a tiny safety minimum.
+
+        Rather than reverting when tiles sit below it, the banner **pushes the
+        whole stack below it**: every other tile whose top is at or below the
+        banner's current bottom is shifted by the height delta (down as it grows,
+        back up as it shrinks), so the layout below moves as one accordion and no
+        overlap is ever created (any same-column tile below necessarily starts at
+        or after the banner's bottom, since overlaps are disallowed). Always
+        applied; returns ``True`` (kept for the prior call-site contract).
+        """
+        lh = max(SNAP, int(h))
+        old_h = self.h_px
+        if lh == old_h:
+            return True
+        delta = lh - old_h
+        old_bottom = self.y_px + old_h
+        for t in self.canvas.tiles():
+            if t is self:
+                continue
+            if t.y_px >= old_bottom - 1:          # below the banner band
+                t.y_px = max(0, t.y_px + delta)
+        self._prev = self.grid_rect()
+        self.h_px = lh
+        self.canvas.reflow()                       # re-place every tile (self + pushed)
+        self.canvas.sync_size()
+        self.geometryCommitted.emit()
+        return True
+
 
 class _DropOverlay(QWidget):
     """Full-canvas, mouse-transparent overlay painting the live drop preview.

@@ -683,6 +683,10 @@ class DashboardWindow(QMainWindow):
         """
         original = dict(element.config)
         form = ElementConfigForm(element=element)
+        # the header's "Banner height" edits tile geometry, not config — snapshot
+        # the tile's height so Cancel can restore it (None for non-header tiles).
+        tile = getattr(element, "_grid_tile", None)
+        original_height = tile.grid_rect()[3] if tile is not None else None
 
         def do_apply():
             _type, cfg = form.result_config()
@@ -695,6 +699,9 @@ class DashboardWindow(QMainWindow):
             new_config["id"] = element.id
             element.config = new_config
             element.reconfigure()
+            h = form.banner_height()
+            if h is not None and tile is not None:
+                tile.set_height_px(h)
 
         debounce = self._make_debounce(do_apply)
         form.changed.connect(lambda: debounce.start())
@@ -707,6 +714,8 @@ class DashboardWindow(QMainWindow):
             debounce.stop()
             element.config = original
             element.reconfigure()
+            if original_height is not None and tile is not None:
+                tile.set_height_px(original_height)
 
         self._inspector.open_editor(
             "Configure — {}".format(element.display_name()),

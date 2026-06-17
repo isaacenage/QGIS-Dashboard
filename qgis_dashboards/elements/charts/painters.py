@@ -63,7 +63,12 @@ class _ChartPainter(QWidget):
         self.update()
 
     def set_data(self, data, selected=None, inner=0.0):
-        self._data = list(data)
+        # The series shapes (grouped/stacked) pass a {categories, series,
+        # matrix} dict; everything else passes a list of tuples. ``list(dict)``
+        # would silently yield the dict's KEYS, so a series painter would then
+        # call ``.get`` on a list and raise inside paintEvent — which, with a
+        # live QPainter, hard-crashes QGIS. Keep dicts intact.
+        self._data = data if isinstance(data, dict) else list(data)
         self._selected = selected
         self._inner = inner
         self.update()
@@ -891,9 +896,13 @@ class _SeriesPainter(_ChartPainter):
                        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, txt)
             y += row_h
 
+    def _payload(self):
+        """Series payload as a dict, tolerating any unexpected type."""
+        return self._data if isinstance(self._data, dict) else {}
+
     def _plot_rect(self, rect):
         legend_w = 0
-        series = (self._data or {}).get("series", [])
+        series = self._payload().get("series", [])
         if rect.width() > 280 and series:
             legend_w = min(int(rect.width() * 0.32), 160)
         return rect.adjusted(0, 0, -legend_w, 0), legend_w
@@ -916,7 +925,7 @@ class GroupedBarPainter(_SeriesPainter):
         p.fillRect(self.rect(), self._bg)
         rect = self.rect().adjusted(8, 8, -8, -8)
         self._geom = None
-        data = self._data or {}
+        data = self._payload()
         cats, series, matrix = (data.get("categories", []),
                                 data.get("series", []), data.get("matrix", []))
         if not cats or not series:
@@ -965,7 +974,7 @@ class StackedBarPainter(_SeriesPainter):
         p.fillRect(self.rect(), self._bg)
         rect = self.rect().adjusted(8, 8, -8, -8)
         self._geom = None
-        data = self._data or {}
+        data = self._payload()
         cats, series, matrix = (data.get("categories", []),
                                 data.get("series", []), data.get("matrix", []))
         if not cats or not series:

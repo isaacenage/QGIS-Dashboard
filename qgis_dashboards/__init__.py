@@ -32,5 +32,5 @@ def classFactory(iface):  # pylint: disable=invalid-name
     :type iface: QgsInterface
     """
     #
-    from .qgis_dashboard import qgisdashboard
+    from .main_plugin import qgisdashboard
     return qgisdashboard(iface)

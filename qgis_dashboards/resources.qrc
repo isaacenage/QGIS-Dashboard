@@ -1,5 +1,5 @@
 <RCC>
-    <qresource prefix="/plugins/qgis_dashboard" >
+    <qresource prefix="/plugins/qgis_dashboards" >
         <file>icon.png</file>
     </qresource>
 </RCC>

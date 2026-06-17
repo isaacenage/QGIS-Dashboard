@@ -22,33 +22,13 @@
 # Edit the following to match your sources lists
 #################################################
 
-
-#Add iso code for any locales you want to support here (space separated)
-# default is no locales
-# LOCALES = af
-LOCALES =
-
-# If locales are enabled, set the name of the lrelease binary on your system. If
-# you have trouble compiling the translations, you may have to specify the full path to
-# lrelease
-#LRELEASE = lrelease
-#LRELEASE = lrelease-qt4
-
-
-# translation
-SOURCES = \
-	__init__.py \
-	qgis_dashboard.py window.py bus.py theme.py presets.py icons.py fonts.py sidebar.py minimized_bubble.py dashboard_canvas.py page_view.py zoom_fit.py tile_snap.py \
-	add_element_dialog.py element_picker.py settings_dialog.py appearance_dialog.py connections_dialog.py side_panel.py form_util.py export_dialog.py \
-	project_io.py recent_store.py start_view.py layout_util.py
-
-PLUGINNAME = qgis_dashboard
-
 PY_FILES = \
 	__init__.py \
-	qgis_dashboard.py window.py bus.py theme.py presets.py icons.py fonts.py sidebar.py minimized_bubble.py dashboard_canvas.py page_view.py zoom_fit.py tile_snap.py \
+	main_plugin.py window.py bus.py theme.py presets.py icons.py fonts.py sidebar.py minimized_bubble.py dashboard_canvas.py page_view.py zoom_fit.py tile_snap.py \
 	add_element_dialog.py element_picker.py settings_dialog.py appearance_dialog.py connections_dialog.py side_panel.py form_util.py export_dialog.py \
 	project_io.py recent_store.py start_view.py layout_util.py
+
+PLUGINNAME = qgis_dashboards
 
 UI_FILES =
 
@@ -75,10 +55,6 @@ QGISDIR=C:\Users\enage.isaac\AppData/Roaming/QGIS/QGIS3/profiles/default/python/
 # Normally you would not need to edit below here
 #################################################
 
-HELP = help/build/html
-
-PLUGIN_UPLOAD = $(c)/plugin_upload.py
-
 RESOURCE_SRC=$(shell grep '^ *<file' resources.qrc | sed 's@</file>@@g;s/.*>//g' | tr '\n' ' ')
 
 .PHONY: default
@@ -88,17 +64,14 @@ default:
 	@echo A Python script, pb_tool provides platform independent management of
 	@echo your plugins and runs anywhere.
 	@echo You can install pb_tool using: pip install pb_tool
-	@echo See https://g-sherman.github.io/plugin_build_tool/ for info. 
+	@echo See https://g-sherman.github.io/plugin_build_tool/ for info.
 
 compile: $(COMPILED_RESOURCE_FILES)
 
 %.py : %.qrc $(RESOURCES_SRC)
 	pyrcc5 -o $*.py  $<
 
-%.qm : %.ts
-	$(LRELEASE) $<
-
-test: compile transcompile
+test: compile
 	@echo
 	@echo "----------------------"
 	@echo "Regression Test Suite"
@@ -113,10 +86,9 @@ test: compile transcompile
 	@echo "----------------------"
 	@echo "If you get a 'no module named qgis.core error, try sourcing"
 	@echo "the helper script we have provided first then run make test."
-	@echo "e.g. source run-env-linux.sh <path to qgis install>; make test"
 	@echo "----------------------"
 
-deploy: compile doc transcompile
+deploy: compile
 	@echo
 	@echo "------------------------------------------"
 	@echo "Deploying plugin to your .qgis2 directory."
@@ -129,8 +101,6 @@ deploy: compile doc transcompile
 	cp -vf $(UI_FILES) $(HOME)/$(QGISDIR)/python/plugins/$(PLUGINNAME)
 	cp -vf $(COMPILED_RESOURCE_FILES) $(HOME)/$(QGISDIR)/python/plugins/$(PLUGINNAME)
 	cp -vf $(EXTRAS) $(HOME)/$(QGISDIR)/python/plugins/$(PLUGINNAME)
-	cp -vfr i18n $(HOME)/$(QGISDIR)/python/plugins/$(PLUGINNAME)
-	cp -vfr $(HELP) $(HOME)/$(QGISDIR)/python/plugins/$(PLUGINNAME)/help
 	# Copy extra directories if any
 	(foreach EXTRA_DIR,(EXTRA_DIRS), cp -R (EXTRA_DIR) (HOME)/(QGISDIR)/python/plugins/(PLUGINNAME)/;)
 
@@ -177,63 +147,12 @@ package: compile
 	git archive --prefix=$(PLUGINNAME)/ -o $(PLUGINNAME).zip $(VERSION)
 	echo "Created package: $(PLUGINNAME).zip"
 
-upload: zip
-	@echo
-	@echo "-------------------------------------"
-	@echo "Uploading plugin to QGIS Plugin repo."
-	@echo "-------------------------------------"
-	$(PLUGIN_UPLOAD) $(PLUGINNAME).zip
-
-transup:
-	@echo
-	@echo "------------------------------------------------"
-	@echo "Updating translation files with any new strings."
-	@echo "------------------------------------------------"
-	@chmod +x scripts/update-strings.sh
-	@scripts/update-strings.sh $(LOCALES)
-
-transcompile:
-	@echo
-	@echo "----------------------------------------"
-	@echo "Compiled translation files to .qm files."
-	@echo "----------------------------------------"
-	@chmod +x scripts/compile-strings.sh
-	@scripts/compile-strings.sh $(LRELEASE) $(LOCALES)
-
-transclean:
-	@echo
-	@echo "------------------------------------"
-	@echo "Removing compiled translation files."
-	@echo "------------------------------------"
-	rm -f i18n/*.qm
-
 clean:
 	@echo
 	@echo "------------------------------------"
 	@echo "Removing uic and rcc generated files"
 	@echo "------------------------------------"
 	rm $(COMPILED_UI_FILES) $(COMPILED_RESOURCE_FILES)
-
-doc:
-	@echo
-	@echo "------------------------------------"
-	@echo "Building documentation using sphinx."
-	@echo "------------------------------------"
-	cd help; make html
-
-pylint:
-	@echo
-	@echo "-----------------"
-	@echo "Pylint violations"
-	@echo "-----------------"
-	@pylint --reports=n --rcfile=pylintrc . || true
-	@echo
-	@echo "----------------------"
-	@echo "If you get a 'no module named qgis.core' error, try sourcing"
-	@echo "the helper script we have provided first then run make pylint."
-	@echo "e.g. source run-env-linux.sh <path to qgis install>; make pylint"
-	@echo "----------------------"
-
 
 # Run pep8 style checking
 #http://pypi.python.org/pypi/pep8

@@ -3,7 +3,7 @@
 
 Run directly so the test package __init__ (which imports qgis) is not loaded:
 
-    cd qgis_dashboard && PYTHONPATH=$(pwd) python test/test_tile_snap.py
+    cd qgis_dashboards && PYTHONPATH=$(pwd) python test/test_tile_snap.py
 """
 import os
 import sys

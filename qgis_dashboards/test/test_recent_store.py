@@ -3,7 +3,7 @@
 
 Run directly::
 
-    cd qgis_dashboard && PYTHONPATH=$(pwd) python test/test_recent_store.py
+    cd qgis_dashboards && PYTHONPATH=$(pwd) python test/test_recent_store.py
 """
 
 __author__ = 'isaacenagework@gmail.com'

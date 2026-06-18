@@ -27,6 +27,7 @@ from qgis.PyQt.QtWidgets import (
 )
 from qgis.PyQt.QtGui import QKeySequence
 from qgis.PyQt.QtCore import Qt, QSize, QEvent, QTimer, pyqtSignal
+from qgis.PyQt import sip
 from qgis.core import QgsProject
 
 # QShortcut lives in QtWidgets on Qt5 (PyQt5) but moved to QtGui on Qt6 (PyQt6);
@@ -1206,7 +1207,22 @@ class DashboardWindow(QMainWindow):
         ``QgsProject`` singleton, it is auto-disconnected by PyQt when this
         window is destroyed, so a later add/remove can't fire into a deleted
         :class:`DashboardBus`.
+
+        It is *also* guarded against a stale connection that outlived its
+        objects: if a previous plugin build/reload left this slot wired to
+        ``QgsProject`` but the owning window (and its child bus) were since torn
+        down, adding a layer would otherwise raise ``RuntimeError: wrapped C/C++
+        object of type DashboardBus has been deleted``. When that is detected we
+        self-disconnect so the dead wiring stops firing.
         """
+        if sip.isdeleted(self) or sip.isdeleted(self.bus):
+            try:
+                proj = QgsProject.instance()
+                proj.layersAdded.disconnect(self._on_project_layers_changed)
+                proj.layersRemoved.disconnect(self._on_project_layers_changed)
+            except (TypeError, RuntimeError):
+                pass
+            return
         self.bus.layersChanged.emit()
 
     def cleanup(self):

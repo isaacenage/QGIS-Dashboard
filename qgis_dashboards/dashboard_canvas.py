@@ -202,14 +202,8 @@ class GridTile(QFrame):
 
         self.header = _DragHandle(self)   # transparent top strip, drag to move
 
-        self.close_btn = QToolButton(self)
-        self.close_btn.setObjectName("tileClose")
-        self.close_btn.setText("✕")
-        self.close_btn.setAutoRaise(True)
-        self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.close_btn.setToolTip("Remove tile")
-        self.close_btn.clicked.connect(lambda: self.closeRequested.emit(self.element))
-
+        # No corner ✕ button: removing a tile is deliberate, via the right-click
+        # menu's "Remove tile" only, so a stray click can't delete a tile.
         self.style_btn = QToolButton(self)
         self.style_btn.setObjectName("tileClose")
         self.style_btn.setText("⚙")
@@ -265,11 +259,10 @@ class GridTile(QFrame):
 
         Hidden while the canvas is grabbed for a PNG/PDF export so the saved
         image shows only the clean tiles, not the editing affordances. The whole
-        editing chrome (drag strip, ⚙/✕ buttons, resize handles) only reappears
+        editing chrome (drag strip, ⚙ button, resize handles) only reappears
         when the layout is not locked (Build mode).
         """
         editing = on and not self._locked
-        self.close_btn.setVisible(editing)
         self.style_btn.setVisible(editing)
         self.header.setVisible(editing)
         for h in self._handles.values():
@@ -278,8 +271,8 @@ class GridTile(QFrame):
     def set_locked(self, locked):
         """Switch the tile between Build (unlocked) and Use (locked) modes.
 
-        **Build mode** (unlocked): the drag strip, resize handles and ⚙/✕
-        buttons are shown so the tile can be moved/resized/configured, and the
+        **Build mode** (unlocked): the drag strip, resize handles and ⚙
+        button are shown so the tile can be moved/resized/configured, and the
         element's contents are inert. **Use mode** (locked): that editing chrome
         is hidden, the tile is fixed, and the element's contents become
         interactive (chart click → filter, map pan/identify, …).
@@ -287,7 +280,6 @@ class GridTile(QFrame):
         self._locked = bool(locked)
         editing = not self._locked
         self.header.setVisible(editing)
-        self.close_btn.setVisible(editing)
         self.style_btn.setVisible(editing)
         for h in self._handles.values():
             h.setVisible(editing)
@@ -298,21 +290,19 @@ class GridTile(QFrame):
         super().resizeEvent(e)
         # Build-mode drag overlay: it covers the whole tile so a drag anywhere on
         # the (inert) card body moves it. The map drives its own body drag, so its
-        # handle stays a thin top strip leaving room for the two corner buttons.
-        # The resize handles + ⚙/✕ buttons are raised above it (below) so they
+        # handle stays a thin top strip leaving room for the corner button.
+        # The resize handles + ⚙ button are raised above it (below) so they
         # stay grabbable through the overlay.
         if getattr(self.element, "handles_own_body_drag", False):
-            self.header.setGeometry(6, 2, max(self.width() - 52, 1), HEADER_H)
+            self.header.setGeometry(6, 2, max(self.width() - 30, 1), HEADER_H)
         else:
             self.header.setGeometry(0, 0, self.width(), self.height())
-        self.close_btn.move(self.width() - 24, 3)
-        self.style_btn.move(self.width() - 46, 3)
+        self.style_btn.move(self.width() - 24, 3)
         self._place_handles()
         self.header.raise_()
         for h in self._handles.values():
             h.raise_()
         self.style_btn.raise_()
-        self.close_btn.raise_()
 
     def _place_handles(self):
         w, h, t = self.width(), self.height(), GRIP

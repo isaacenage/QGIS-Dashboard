@@ -250,11 +250,14 @@ class DashboardWindow(QMainWindow):
         self.add_page("Page 1")
         self.show_dashboard()
 
-        # keep config combos / map mirror fresh as project layers change
-        QgsProject.instance().layersAdded.connect(
-            lambda *_: self.bus.layersChanged.emit())
-        QgsProject.instance().layersRemoved.connect(
-            lambda *_: self.bus.layersChanged.emit())
+        # Keep config combos / map mirror fresh as project layers change.
+        # These live on the long-lived QgsProject singleton, which OUTLIVES this
+        # window — so connect a bound method (PyQt auto-disconnects it when the
+        # window is destroyed) rather than a lambda (never auto-disconnected,
+        # leaving a dangling call into a deleted DashboardBus). cleanup() also
+        # drops them explicitly on plugin unload. See _on_project_layers_changed.
+        QgsProject.instance().layersAdded.connect(self._on_project_layers_changed)
+        QgsProject.instance().layersRemoved.connect(self._on_project_layers_changed)
         self.bus.filtersChanged.connect(self._update_filter_label)
         self.bus.filtersCleared.connect(self._update_filter_label)
         self.bus.themeChanged.connect(self._on_theme_changed)
@@ -1193,6 +1196,34 @@ class DashboardWindow(QMainWindow):
         self._set_editing_locked(bool(data.get("locked")), update_button=True)
 
         self._schedule_reframe()   # fit the loaded page to the viewport
+
+    # ---- project-wide signal wiring (QgsProject singleton) ----
+
+    def _on_project_layers_changed(self, *args):
+        """Project layers were added/removed — refresh layer-bound widgets.
+
+        A plain method (not a lambda) on purpose: connected to the long-lived
+        ``QgsProject`` singleton, it is auto-disconnected by PyQt when this
+        window is destroyed, so a later add/remove can't fire into a deleted
+        :class:`DashboardBus`.
+        """
+        self.bus.layersChanged.emit()
+
+    def cleanup(self):
+        """Drop connections to the long-lived ``QgsProject`` singleton.
+
+        Called by the plugin's ``unload()`` before the window is deleted. PyQt
+        would auto-disconnect these on destruction anyway (they use a bound
+        method), but disconnecting eagerly closes the window between
+        ``deleteLater()`` and actual deletion where a layer change could still
+        arrive.
+        """
+        proj = QgsProject.instance()
+        for signal in (proj.layersAdded, proj.layersRemoved):
+            try:
+                signal.disconnect(self._on_project_layers_changed)
+            except (TypeError, RuntimeError):
+                pass
 
     # ---- persistence into the .qgz project ----
 

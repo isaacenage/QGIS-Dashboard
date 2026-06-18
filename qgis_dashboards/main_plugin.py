@@ -161,9 +161,25 @@ class qgisdashboard:
             self.window.show_start()
 
     def unload(self):
-        """Removes the plugin menu item and icon from QGIS GUI."""
+        """Removes the plugin menu item and icon from QGIS GUI.
+
+        Crucially also tears down every connection this plugin made to
+        long-lived singletons (the ``QgsProject`` instance and ``iface``). Those
+        outlive the plugin, so a connection left behind after unload/reload
+        fires into deleted Python/C++ objects on the next project save, layer
+        add/remove, etc. — surfacing as ``RuntimeError: wrapped C/C++ object ...
+        has been deleted``.
+        """
         try:
             QgsProject.instance().writeProject.disconnect(self._on_write)
+        except (TypeError, RuntimeError):
+            pass
+        try:
+            self.iface.projectRead.disconnect(self._on_read)
+        except (TypeError, RuntimeError):
+            pass
+        try:
+            self.iface.newProjectCreated.disconnect(self._on_new)
         except (TypeError, RuntimeError):
             pass
         for action in self.actions:
@@ -171,6 +187,7 @@ class qgisdashboard:
             self.iface.removeToolBarIcon(action)
         self.actions = []
         if self.window:
+            self.window.cleanup()   # drop the window's QgsProject connections
             self.window.close()
             self.window.deleteLater()
             self.window = None

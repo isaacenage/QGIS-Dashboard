@@ -43,7 +43,7 @@ _SS = 4
 def _stroke(body):
     return (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" '
-        'fill="none" stroke="#000000" stroke-width="1.8" '
+        'fill="none" stroke="#000000" stroke-width="1.0" '
         'stroke-linecap="round" stroke-linejoin="round">{}</svg>'
     ).format(body)
 
@@ -82,7 +82,7 @@ ICONS = {
     "appearance": (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">'
         '<path d="M12 21C16.9706 21 21 16.9706 21 12C21 7.02944 16.9706 3 12 3C7.02944 3 '
-        '3 7.02944 3 12C3 16.9706 7.02944 21 12 21Z" stroke="#000" stroke-width="1.6"/>'
+        '3 7.02944 3 12C3 16.9706 7.02944 21 12 21Z" stroke="#000" stroke-width="1.0"/>'
         '<path d="M12 5.25V18.75C15.7279 18.75 18.75 15.7279 18.75 12C18.75 8.27208 '
         '15.7279 5.25 12 5.25Z" fill="#000"/>'
         '</svg>'),
@@ -128,6 +128,14 @@ ICONS = {
         '<circle cx="12" cy="12" r="9"/>'
         '<line x1="12" y1="11" x2="12" y2="16"/>'
         '<circle cx="12" cy="7.8" r="0.4"/>'),
+    # undo (curved arrow returning anticlockwise to the left)
+    "undo": _stroke(
+        '<polyline points="8 7 4 11 8 15"/>'
+        '<path d="M4 11h9a5 5 0 0 1 0 10h-3.5"/>'),
+    # redo (mirror of undo — curved arrow returning clockwise to the right)
+    "redo": _stroke(
+        '<polyline points="16 7 20 11 16 15"/>'
+        '<path d="M20 11h-9a5 5 0 0 0 0 10h3.5"/>'),
     # clear the active cross-filter (funnel + slash)
     "clear_filter": _stroke(
         '<path d="M3 4h18l-7 8.2V19l-4 2v-8.8z"/>'
@@ -165,12 +173,12 @@ ICONS = {
     # fit / reset (corner brackets + center dot) — tinted to one color
     "zoom_reset": (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
-        'stroke="#000" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">'
+        'stroke="#000" stroke-width="1.0" stroke-linecap="round" stroke-linejoin="round">'
         '<path d="M4.5 9V4.5H9"/>'
         '<path d="M15 4.5H19.5V9"/>'
         '<path d="M4.5 15V19.5H9"/>'
         '<path d="M15 19.5H19.5V15"/>'
-        '<circle cx="12" cy="12" r="2.1" stroke-width="1.5"/>'
+        '<circle cx="12" cy="12" r="2.1" stroke-width="1.0"/>'
         '</svg>'),
     "zoom_in": _stroke(
         '<circle cx="11" cy="11" r="7"/>'
@@ -180,7 +188,7 @@ ICONS = {
     # export / share (box with an arrow leaving it) — tinted to one color
     "export": (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
-        'stroke="#000" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
+        'stroke="#000" stroke-width="1.0" stroke-linecap="round" stroke-linejoin="round">'
         '<path d="M13 11L21.2 2.80005"/>'
         '<path d="M22 6.8V2H17.2"/>'
         '<path d="M11 2H9C4 2 2 4 2 9V15C2 20 4 22 9 22H15C20 22 22 20 22 15V13"/>'

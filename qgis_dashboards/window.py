@@ -15,6 +15,7 @@ open. ``migrate_layout`` upgrades the older v1 (bare list) and v2 (single page)
 blobs on load.
 """
 
+import copy
 import json
 import os
 import uuid
@@ -24,8 +25,18 @@ from qgis.PyQt.QtWidgets import (
     QTabBar, QStackedWidget, QVBoxLayout, QMessageBox, QInputDialog, QMenu,
     QFileDialog,
 )
+from qgis.PyQt.QtGui import QKeySequence
 from qgis.PyQt.QtCore import Qt, QSize, QEvent, QTimer, pyqtSignal
 from qgis.core import QgsProject
+
+# QShortcut lives in QtWidgets on Qt5 (PyQt5) but moved to QtGui on Qt6 (PyQt6);
+# import defensively so the plugin works across QGIS 3.22 – 4.99.
+try:                                          # Qt6 / PyQt6
+    from qgis.PyQt.QtGui import QShortcut
+except ImportError:                           # pragma: no cover - Qt5 / PyQt5
+    from qgis.PyQt.QtWidgets import QShortcut
+
+from .history import History
 
 from .bus import DashboardBus
 from .theme import Theme, CHROME
@@ -166,6 +177,18 @@ class DashboardWindow(QMainWindow):
         # moved/resized. Off by default so the dashboard is editable on open.
         self._editing_locked = False
 
+        # undo/redo over whole-dashboard snapshots (session-only, like zoom).
+        # Recording is debounced so the many signals one edit fires — and the
+        # slider drags of a live appearance edit — collapse into one entry; it
+        # is suspended while a snapshot is being replayed so undo/redo can't
+        # re-record themselves. Seeded once the first page exists.
+        self._history = History()
+        self._suspend_history = True
+        self._history_timer = QTimer(self)
+        self._history_timer.setSingleShot(True)
+        self._history_timer.setInterval(120)
+        self._history_timer.timeout.connect(self._record_history)
+
         # set when a dashboard is loaded/created while the window is hidden, so
         # the first show fits the export/print region to the viewport.
         self._needs_reframe = False
@@ -236,6 +259,21 @@ class DashboardWindow(QMainWindow):
         self.bus.filtersCleared.connect(self._update_filter_label)
         self.bus.themeChanged.connect(self._on_theme_changed)
 
+        # persisted, non-geometry mutations also feed the undo timeline (tile
+        # geometry/add/remove come in via each canvas.layoutChanged, wired in
+        # add_page). filtersChanged is deliberately NOT recorded — live
+        # cross-filter selection is not part of the saved layout.
+        self.bus.themeChanged.connect(self._schedule_history)
+        self.bus.connectionsChanged.connect(self._schedule_history)
+
+        # Window-wide undo/redo shortcuts (the rail buttons mirror these).
+        self._add_shortcut("Ctrl+Z", self.undo)
+        self._add_shortcut("Ctrl+Y", self.redo)
+        self._add_shortcut("Ctrl+Shift+Z", self.redo)
+
+        # seed the timeline from the initial blank dashboard and enable signals
+        self._reset_history()
+
     # ---- chrome ----
 
     def _build_sidebar(self):
@@ -248,6 +286,11 @@ class DashboardWindow(QMainWindow):
             "add_element", "Add element", self.open_element_picker)
         self.sidebar.add_action(
             "add_page", "Add page", self._add_page_interactive)
+        self.sidebar.add_separator()
+        self._undo_btn = self.sidebar.add_action(
+            "undo", "Undo (Ctrl+Z)", self.undo)
+        self._redo_btn = self.sidebar.add_action(
+            "redo", "Redo (Ctrl+Y)", self.redo)
         self.sidebar.add_separator()
         self.sidebar.add_action("zoom_in", "Zoom in", self._zoom_in)
         self.sidebar.add_action(
@@ -324,6 +367,7 @@ class DashboardWindow(QMainWindow):
             else "Lock to use — currently in Build mode (move/resize/configure)")
         for page in self._pages:
             page.canvas.set_locked(self._editing_locked)
+        self._schedule_history()   # the Build/Use lock is persisted (suspended on load)
 
     def _open_export_menu(self):
         menu = QMenu(self)
@@ -416,12 +460,89 @@ class DashboardWindow(QMainWindow):
         self.start_view.set_can_continue(bool(self._pages))
         self.start_view.set_recents(self._recent_store.load_recents())
         self._content_stack.setCurrentWidget(self.start_view)
+        self._update_history_buttons()   # undo/redo don't apply on the Start screen
 
     def show_dashboard(self):
         """Show the page canvas, leaving the Start screen."""
         if not self._pages:
             return   # nothing to show yet — stay on the Start screen
         self._content_stack.setCurrentWidget(self._pages_col)
+        self._update_history_buttons()
+
+    # ---- undo / redo (whole-dashboard snapshot timeline) ----
+
+    def _add_shortcut(self, sequence, slot):
+        sc = QShortcut(QKeySequence(sequence), self)
+        sc.activated.connect(slot)
+        return sc
+
+    def _snapshot(self):
+        """A normalized deep copy of the current layout for the history stack."""
+        return copy.deepcopy(self._build_layout_dict())
+
+    def _schedule_history(self, *args):
+        """Queue a (debounced) history record after the current edit settles."""
+        if self._suspend_history:
+            return
+        self._history_timer.start()
+
+    def _record_history(self):
+        """Commit the current dashboard state as a new timeline entry."""
+        if self._suspend_history or not self._pages:
+            return
+        if self._history.record(self._snapshot()):
+            self._update_history_buttons()
+
+    def _reset_history(self):
+        """Re-seed the timeline from the current dashboard (load / new / boot).
+
+        Clears the undo/redo stacks: a freshly loaded or created dashboard
+        starts a brand-new timeline. Also (re)enables recording.
+        """
+        self._history_timer.stop()
+        self._history = History(self._snapshot() if self._pages else None)
+        self._suspend_history = False
+        self._update_history_buttons()
+
+    def _history_active(self):
+        """Undo/redo only act on a shown dashboard, never mid-rebuild.
+
+        Gating here (not just on button state) matters because the keyboard
+        shortcuts fire regardless of the rail buttons — so without this, Ctrl+Z
+        on the Start screen would pop a state off the stack without applying it.
+        """
+        return (not self._suspend_history and bool(self._pages)
+                and self._content_stack.currentWidget() is self._pages_col)
+
+    def _update_history_buttons(self):
+        on_dash = bool(self._pages) and \
+            self._content_stack.currentWidget() is self._pages_col
+        if getattr(self, "_undo_btn", None) is not None:
+            self._undo_btn.setEnabled(on_dash and self._history.can_undo())
+        if getattr(self, "_redo_btn", None) is not None:
+            self._redo_btn.setEnabled(on_dash and self._history.can_redo())
+
+    def undo(self):
+        if self._history_active():
+            self._apply_history(self._history.undo())
+
+    def redo(self):
+        if self._history_active():
+            self._apply_history(self._history.redo())
+
+    def _apply_history(self, snapshot):
+        """Replay *snapshot* (from undo/redo) without disturbing the timeline."""
+        if snapshot is None or not self._pages:
+            return
+        self._suspend_history = True
+        try:
+            self._apply_layout_dict(snapshot)
+            self.show_dashboard()
+        finally:
+            # cancel any record the rebuild's signals queued, then re-arm
+            self._history_timer.stop()
+            self._suspend_history = False
+        self._update_history_buttons()
 
     def new_dashboard(self):
         """Create a fresh, blank dashboard (one page) and show it."""
@@ -435,6 +556,7 @@ class DashboardWindow(QMainWindow):
         self._set_editing_locked(False)   # a blank dashboard opens in Build mode
         self.show_dashboard()
         self._schedule_reframe()
+        self._reset_history()             # fresh dashboard → fresh timeline
 
     # ---- standalone .qdash save / open ----
 
@@ -486,6 +608,7 @@ class DashboardWindow(QMainWindow):
             return
         self._apply_layout_dict(data)
         self.show_dashboard()
+        self._reset_history()             # opened dashboard → fresh timeline
         self._recent_store.record(path, project_io.display_name(path))
 
     def _confirm_replace(self):
@@ -535,6 +658,8 @@ class DashboardWindow(QMainWindow):
         canvas.set_locked(self._editing_locked)   # honour the current layout lock
         canvas.set_gap(self.canvas_gap())          # honour the current element gap
         canvas.set_region(*self.canvas_size())     # honour the current page size
+        # tile move/resize/add/remove on this page feeds the undo timeline
+        canvas.layoutChanged.connect(self._schedule_history)
         view = PageView(canvas)
         page = DashboardPage(page_id, title, view)
         self._pages.append(page)
@@ -567,6 +692,7 @@ class DashboardWindow(QMainWindow):
         page.view.deleteLater()
         self._tab_bar.removeTab(idx)
         self._update_tabbar_visibility()
+        self._schedule_history()
 
     def _update_tabbar_visibility(self):
         """Keep the page tab bar visible whenever there's at least one page.
@@ -579,6 +705,7 @@ class DashboardWindow(QMainWindow):
 
     def _add_page_interactive(self):
         self.add_page("Page {}".format(len(self._pages) + 1))
+        self._schedule_history()
 
     def _on_tab_changed(self, idx):
         # an open editor belongs to the page being left — keep its live edits
@@ -594,6 +721,7 @@ class DashboardWindow(QMainWindow):
         view = self._stack.widget(frm)
         self._stack.removeWidget(view)
         self._stack.insertWidget(to, view)
+        self._schedule_history()
 
     def _rename_page_at(self, idx):
         if not (0 <= idx < len(self._pages)):
@@ -604,6 +732,7 @@ class DashboardWindow(QMainWindow):
         if ok and text.strip():
             page.title = text.strip()
             self._tab_bar.setTabText(idx, page.title)
+            self._schedule_history()
 
     def _tab_context_menu(self, pos):
         idx = self._tab_bar.tabAt(pos)
@@ -709,6 +838,7 @@ class DashboardWindow(QMainWindow):
         def commit():
             debounce.stop()
             do_apply()
+            self._schedule_history()
 
         def cancel():
             debounce.stop()
@@ -716,6 +846,7 @@ class DashboardWindow(QMainWindow):
             element.reconfigure()
             if original_height is not None and tile is not None:
                 tile.set_height_px(original_height)
+            self._schedule_history()   # reverts to baseline → deduped to a no-op
 
         self._inspector.open_editor(
             "Configure — {}".format(element.display_name()),
@@ -741,16 +872,21 @@ class DashboardWindow(QMainWindow):
 
         form.changed.connect(live)
 
+        def commit():
+            live()
+            self._schedule_history()
+
         def cancel():
             if original is not None:
                 element.config["style"] = original
             else:
                 element.config.pop("style", None)
             element.apply_theme()
+            self._schedule_history()   # reverts to baseline → deduped to a no-op
 
         self._inspector.open_editor(
             "Tile appearance — {}".format(element.display_name()),
-            form, on_commit=live, on_cancel=cancel, subject=element)
+            form, on_commit=commit, on_cancel=cancel, subject=element)
 
     def _make_debounce(self, fn, msec=160):
         """A single-shot QTimer that runs *fn* shortly after the last start()."""
@@ -794,7 +930,16 @@ class DashboardWindow(QMainWindow):
                              on_canvas_size=self._set_canvas_size,
                              gap=self.canvas_gap(),
                              canvas_size=self.canvas_size())
-        dlg.exec()
+        # Settings applies live (theme, radius, text sizes, gap, canvas size);
+        # pause recording during the dialog so the whole session collapses into
+        # a single undo step captured on close.
+        was_suspended = self._suspend_history
+        self._suspend_history = True
+        try:
+            dlg.exec()
+        finally:
+            self._suspend_history = was_suspended
+        self._schedule_history()
 
     def _apply_global_theme(self, theme):
         """Apply a theme from the *Themes* editor (canvas colors + fonts).
@@ -912,6 +1057,9 @@ class DashboardWindow(QMainWindow):
         super().closeEvent(event)
 
     def clear_all(self):
+        # pause history while the dashboard is torn down/rebuilt; the rebuild's
+        # caller re-seeds the timeline (load/new) or undo/redo re-arms it.
+        self._suspend_history = True
         # discard any open editor before its subject tiles are destroyed
         if getattr(self, "_inspector", None) is not None:
             self._inspector.close_active(commit=False)
@@ -1073,3 +1221,4 @@ class DashboardWindow(QMainWindow):
             return
         self._apply_layout_dict(data)
         self.show_dashboard()
+        self._reset_history()             # loaded dashboard → fresh timeline

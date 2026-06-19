@@ -25,7 +25,12 @@ import os.path
 
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction
+# QAction lives in QtWidgets on Qt5 (PyQt5) but moved to QtGui on Qt6 (PyQt6);
+# import defensively so the plugin works across QGIS 3.22 – 4.99.
+try:                                          # Qt6 / PyQt6
+    from qgis.PyQt.QtGui import QAction
+except ImportError:                           # pragma: no cover - Qt5 / PyQt5
+    from qgis.PyQt.QtWidgets import QAction
 from qgis.core import QgsProject
 
 # Initialize Qt resources from file resources.py. The compiled resources file

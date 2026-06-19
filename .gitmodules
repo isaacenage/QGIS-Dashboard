@@ -1,0 +1,3 @@
+[submodule "plugins/TitlePlotterPH"]
+	path = plugins/TitlePlotterPH
+	url = https://github.com/isaacenage/TitlePlotterPH.git

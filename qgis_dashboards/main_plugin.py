@@ -140,6 +140,12 @@ class qgisdashboard:
             self.window = DashboardWindow(self.iface, self.iface.mainWindow())
             # untick the toolbar action when the user closes the window
             self.window.closed.connect(lambda: self.action.setChecked(False))
+            # The window is created lazily on first toggle, AFTER projectRead has
+            # already fired — so it never saw load_from_project() and would open
+            # to a blank default canvas. Sync it to the current project now: an
+            # existing dashboard opens to its canvas, anything else (fresh/empty
+            # project) greets the user with the Home/Start screen.
+            self.window.load_from_project()
         return self.window
 
     def toggle(self, checked):

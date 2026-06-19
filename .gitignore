@@ -14,3 +14,12 @@ __pycache__/
 
 # Reference copy of the upstream Summarizer project (not part of this repo)
 Summarizer-main/
+
+# Website (Next.js at repo root)
+node_modules/
+.next/
+out/
+.vercel/
+next-env.d.ts
+*.tsbuildinfo
+.env*.local

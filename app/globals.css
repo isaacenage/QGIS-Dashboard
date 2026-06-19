@@ -1,0 +1,174 @@
+@import "tailwindcss";
+
+/*
+  QGIS Dashboard — site design system.
+
+  Grounded in the plugin's own identity: the gradient parallelogram logo
+  (blue → amber → green), accent blue #2B7DE9, soft hairline #E2E6EC, light
+  neutral chrome. The dashboard *tile* is the structural unit; the signature is
+  the cross-filter interaction ("dim the unrelated").
+*/
+
+:root {
+  --paper: #fafbfc;
+  --surface: #ffffff;
+  --ink: #1a1f26;
+  --muted: #55606d;
+  --faint: #8a93a0;
+  --accent: #2b7de9;
+  --accent-ink: #1f5fb4;
+  --line: #e2e6ec;
+  --line-strong: #d4dae2;
+
+  /* the logo's gradient ends — the categorical signature set */
+  --cat-blue: #5e97d0;
+  --cat-amber: #e89a5c;
+  --cat-green: #6fb890;
+
+  --radius: 12px;
+  --radius-lg: 18px;
+  --shadow-tile: 0 1px 2px rgba(26, 31, 38, 0.04), 0 8px 24px rgba(26, 31, 38, 0.05);
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-cat-blue: var(--cat-blue);
+  --color-cat-amber: var(--cat-amber);
+  --color-cat-green: var(--cat-green);
+
+  --font-display: var(--font-space-grotesk), "Century Gothic", "Questrial", system-ui, sans-serif;
+  --font-sans: var(--font-inter), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, "SFMono-Regular", monospace;
+
+  --radius-tile: var(--radius);
+  --radius-card: var(--radius-lg);
+}
+
+* {
+  border-color: var(--line);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* Visible keyboard focus everywhere (quality floor). */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@layer components {
+  /* The dashboard tile — the site's structural unit. */
+  .tile {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-tile);
+  }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+  }
+
+  .eyebrow::before {
+    content: "";
+    width: 1.6rem;
+    height: 2px;
+    background: linear-gradient(90deg, var(--cat-blue), var(--cat-amber), var(--cat-green));
+    border-radius: 2px;
+  }
+
+  .display {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+    line-height: 1.04;
+    font-weight: 600;
+  }
+
+  .stat {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    padding: 0.7rem 1.3rem;
+    transition: transform 0.12s ease, background 0.15s ease, border-color 0.15s ease;
+  }
+  .btn:active {
+    transform: translateY(1px);
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+  }
+  .btn-primary:hover {
+    background: var(--accent-ink);
+  }
+  .btn-ghost {
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--line-strong);
+  }
+  .btn-ghost:hover {
+    border-color: var(--accent);
+    color: var(--accent-ink);
+  }
+
+  /* The cross-filter language: when a group is "filtering", non-active
+     siblings dim. Used by the hero demo and echoed across the site. */
+  .crossfilter [data-dim="true"] {
+    opacity: 0.32;
+    filter: saturate(0.6);
+  }
+  .crossfilter * {
+    transition: opacity 0.28s ease, filter 0.28s ease, fill 0.28s ease;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

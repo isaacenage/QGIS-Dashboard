@@ -378,6 +378,9 @@ class DashboardWindow(QMainWindow):
         menu.addAction("Export to HTML").triggered.connect(self.export_to_html)
         menu.addAction("Export to PNG").triggered.connect(self.export_to_png)
         menu.addAction("Export to PDF").triggered.connect(self.export_to_pdf)
+        menu.addSeparator()
+        menu.addAction("Publish to public…").triggered.connect(
+            self.publish_to_public)
         menu.exec(self._export_btn.mapToGlobal(
             self._export_btn.rect().bottomLeft()))
 
@@ -994,6 +997,10 @@ class DashboardWindow(QMainWindow):
     def export_to_pdf(self):
         from .export.raster_export import export_pdf
         export_pdf(self, self)
+
+    def publish_to_public(self):
+        from .publish_dialog import PublishDialog
+        PublishDialog(self, self).exec()
 
     # ---- lifecycle ----
 

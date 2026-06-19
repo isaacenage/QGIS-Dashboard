@@ -162,8 +162,12 @@ def _build_tile(tile, fid_indexes, skip_layers, window, layers_model):
     return out
 
 
-def export_dashboard(window, out_path, skip_layers=None):
-    """Write the dashboard to *out_path* as a single HTML file. Returns the path."""
+def build_dashboard_html(window, skip_layers=None):
+    """Assemble the dashboard into a single self-contained HTML string.
+
+    The shared core of both file export and *Publish to public* — the latter
+    needs the HTML in memory (to base64) without a temp-file round trip.
+    """
     skip_layers = set(skip_layers or [])
     layers_model, fid_indexes = _collect_layers(window, skip_layers)
 
@@ -188,10 +192,14 @@ def export_dashboard(window, out_path, skip_layers=None):
 
     css_vars = theme_to_css_vars(model["theme"])
     runtime_css, runtime_js, leaflet_css, leaflet_js = load_assets()
-    html = build_html(model, css_vars, runtime_css, runtime_js,
+    return build_html(model, css_vars, runtime_css, runtime_js,
                       leaflet_css=leaflet_css, leaflet_js=leaflet_js,
                       title=_project_title())
 
+
+def export_dashboard(window, out_path, skip_layers=None):
+    """Write the dashboard to *out_path* as a single HTML file. Returns the path."""
+    html = build_dashboard_html(window, skip_layers=skip_layers)
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(html)
     return out_path

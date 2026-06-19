@@ -153,7 +153,7 @@ export default function GuidePage() {
               this website&rsquo;s gallery. The plugin exports the interactive
               HTML, renders a thumbnail, and commits both to the gallery
               repository in one step — your dashboard appears as a card at{" "}
-              <Code>{SITE.domain}/qdashboard/gallery</Code> within a minute.
+              <Code>{SITE.domain}/qdashboards/gallery</Code> within a minute.
             </p>
             <ol className="ml-1 space-y-2">
               <ListNum n="1">

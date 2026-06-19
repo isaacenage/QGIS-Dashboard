@@ -28,4 +28,4 @@ public/dashboards/
 Normally the plugin's **Publish to public** writes all of this for you. To seed
 the gallery by hand: export a dashboard from QGIS (Export to HTML), drop it at
 `<slug>/index.html`, add a `thumb.png`, and append an entry to `manifest.json`.
-Paths are relative to `public/`; the site prepends its `/qdashboard` base path.
+Paths are relative to `public/`; the site prepends its `/qdashboards` base path.

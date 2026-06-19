@@ -16,10 +16,12 @@ import json
 import re
 import unicodedata
 
-# Default gallery target (overridable in the publish dialog).
-DEFAULT_REPO = "isaacenage/QGIS-Dashboard"
+# Default gallery target (overridable in the publish dialog). The website and
+# its public/dashboards/ store now live in the QGIS-Plugins monorepo, served at
+# the /qdashboards route segment of the hub.
+DEFAULT_REPO = "isaacenage/QGIS-Plugins"
 DEFAULT_BRANCH = "main"
-PUBLIC_BASE_URL = "https://qgis.byzenterra.org/qdashboard"
+PUBLIC_BASE_URL = "https://qgis.byzenterra.org/qdashboards"
 
 # Where published assets live in the website repo (relative to repo root).
 DASHBOARDS_ROOT = "public/dashboards"
@@ -132,7 +134,7 @@ def parse_repo(repo):
     parts = (repo or "").strip().strip("/").split("/")
     if len(parts) != 2 or not parts[0] or not parts[1]:
         raise ValueError(
-            "Repository must be in 'owner/name' form, e.g. isaacenage/QGIS-Dashboard")
+            "Repository must be in 'owner/name' form, e.g. isaacenage/QGIS-Plugins")
     return parts[0], parts[1]
 
 

@@ -1,8 +1,9 @@
-import { withBase } from "./site";
-
 // The single contract between the plugin and this site. The plugin's
 // "Publish to public" writes public/dashboards/manifest.json as an array of
 // these entries; the gallery reads them. Paths are relative to public/.
+//
+// These resolve to /dashboards/... at the domain ROOT — NOT the /qdashboards
+// page segment — because they are static files under public/, served verbatim.
 export interface DashboardEntry {
   slug: string;
   title: string;
@@ -13,15 +14,20 @@ export interface DashboardEntry {
   description?: string;
 }
 
+/** Absolute, root-relative URL for a public/ asset path (leading slash, deduped). */
+function assetUrl(relPath: string): string {
+  return `/${relPath.replace(/^\/+/, "")}`;
+}
+
 /** URL of a dashboard's self-contained index.html (for the viewer iframe). */
 export function dashboardSrc(entry: DashboardEntry): string {
-  return withBase(`/${entry.path.replace(/^\/+/, "")}`);
+  return assetUrl(entry.path);
 }
 
 /** URL of a dashboard's thumbnail, or null if it has none. */
 export function thumbSrc(entry: DashboardEntry): string | null {
   if (!entry.thumb) return null;
-  return withBase(`/${entry.thumb.replace(/^\/+/, "")}`);
+  return assetUrl(entry.thumb);
 }
 
 /**
@@ -31,7 +37,7 @@ export function thumbSrc(entry: DashboardEntry): string | null {
  */
 export async function loadManifest(): Promise<DashboardEntry[]> {
   try {
-    const res = await fetch(withBase("/dashboards/manifest.json"), {
+    const res = await fetch(assetUrl("dashboards/manifest.json"), {
       cache: "no-store",
     });
     if (!res.ok) return [];

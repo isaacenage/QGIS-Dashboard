@@ -23,3 +23,6 @@ out/
 next-env.d.ts
 *.tsbuildinfo
 .env*.local
+
+# Visual brainstorming companion scratch
+.superpowers/

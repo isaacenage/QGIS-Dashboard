@@ -87,3 +87,15 @@ export function Wordmark({ size = 32 }: { size?: number }) {
     </span>
   );
 }
+
+// The umbrella wordmark for the root hub — same gradient mark, "QGIS Plugins".
+export function HubWordmark({ size = 32 }: { size?: number }) {
+  return (
+    <span className="inline-flex items-center gap-2.5">
+      <Logo size={size} />
+      <span className="display text-[1.15rem] font-semibold tracking-tight">
+        QGIS<span className="text-accent"> Plugins</span>
+      </span>
+    </span>
+  );
+}

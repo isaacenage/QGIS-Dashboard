@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { Space_Grotesk, Inter, JetBrains_Mono } from "next/font/google";
-import { SITE } from "@/lib/site";
-import { SiteHeader } from "@/components/site-header";
-import { SiteFooter } from "@/components/site-footer";
+import { HUB } from "@/lib/site";
 import "./globals.css";
 
 const spaceGrotesk = Space_Grotesk({
@@ -21,14 +19,17 @@ const jetbrainsMono = JetBrains_Mono({
   display: "swap",
 });
 
+// Root layout owns <html>/<body>/fonts and the hub-level title scope. It does
+// NOT render any header/footer: the hub page ("/") supplies its own chrome, and
+// the dashboard section (app/qdashboards/layout.tsx) supplies the plugin chrome.
 export const metadata: Metadata = {
   title: {
-    default: `${SITE.name} — ${SITE.tagline}`,
-    template: `%s · ${SITE.name}`,
+    default: `${HUB.name} — ${HUB.tagline}`,
+    template: `%s · ${HUB.name}`,
   },
   description:
-    "A free, open-source QGIS plugin for building ArcGIS-Dashboards-style interactive dashboards from your project's vector layers — charts, indicators, lists, a live map and selectors that cross-filter each other in real time.",
-  metadataBase: new URL(`https://${SITE.domain}`),
+    "A growing collection of free, open-source QGIS plugins by Isaac Enage — practical tools that extend the desktop GIS you already use.",
+  metadataBase: new URL(`https://${HUB.domain}`),
 };
 
 export default function RootLayout({
@@ -39,9 +40,7 @@ export default function RootLayout({
       <body
         className={`${spaceGrotesk.variable} ${inter.variable} ${jetbrainsMono.variable}`}
       >
-        <SiteHeader />
-        <main>{children}</main>
-        <SiteFooter />
+        {children}
       </body>
     </html>
   );

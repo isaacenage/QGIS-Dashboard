@@ -52,11 +52,11 @@ class TestPaths(unittest.TestCase):
     def test_view_url(self):
         self.assertEqual(
             public_view_url("harbor-traffic"),
-            "https://qgis.byzenterra.org/qdashboard/view?d=harbor-traffic")
+            "https://qgis.byzenterra.org/qdashboards/view?d=harbor-traffic")
 
     def test_view_url_encodes(self):
         self.assertEqual(public_view_url("a b"),
-                         "https://qgis.byzenterra.org/qdashboard/view?d=a%20b")
+                         "https://qgis.byzenterra.org/qdashboards/view?d=a%20b")
 
 
 class TestBuildEntry(unittest.TestCase):

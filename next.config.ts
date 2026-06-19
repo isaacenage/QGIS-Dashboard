@@ -1,19 +1,13 @@
 import type { NextConfig } from "next";
 
-// The site is served from a sub-path of an existing domain:
-//   https://qgis.byzenterra.org/qdashboard
-// basePath makes every route + asset resolve under /qdashboard, both in dev
-// (http://localhost:3000/qdashboard) and on Vercel. NEXT_PUBLIC_BASE_PATH lets
-// client code (manifest fetch, iframe src) prepend the same prefix.
-const basePath = "/qdashboard";
-
+// The site is served from the root of https://qgis.byzenterra.org/ — a single
+// Next.js app whose "/" is the QGIS Plugins hub and whose "/qdashboards/*"
+// route segment is the QGIS Dashboard site. There is no Next basePath: the
+// "/qdashboards" prefix is a real route segment, applied to dashboard links by
+// lib/site.ts → withBase(). Published dashboards live as static files under
+// public/dashboards/ and are served verbatim from /dashboards/.
 const nextConfig: NextConfig = {
-  basePath,
-  env: {
-    NEXT_PUBLIC_BASE_PATH: basePath,
-  },
-  // Published dashboards live as static files under public/dashboards/ and are
-  // served verbatim; nothing to transform there.
+  // The plugin source folder is not part of the website; never trace it.
   outputFileTracingExcludes: {
     "*": ["./qgis_dashboards/**"],
   },

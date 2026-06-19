@@ -55,8 +55,9 @@ export default function GuidePage() {
           <Step id="install" n="01" title="Install the plugin">
             <p>
               QGIS Dashboard installs with no build step. Copy the{" "}
-              <Code>qgis_dashboards</Code> folder from the repository into your
-              QGIS profile&rsquo;s plugins directory, then enable it under{" "}
+              <Code>plugins/qgis_dashboards</Code> folder from the repository
+              into your QGIS profile&rsquo;s plugins directory, then enable it
+              under{" "}
               <em>Plugins → Manage and Install Plugins</em>.
             </p>
             <Pre>

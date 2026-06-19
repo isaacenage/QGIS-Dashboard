@@ -7,9 +7,9 @@ import type { NextConfig } from "next";
 // lib/site.ts → withBase(). Published dashboards live as static files under
 // public/dashboards/ and are served verbatim from /dashboards/.
 const nextConfig: NextConfig = {
-  // The plugin source folder is not part of the website; never trace it.
+  // The plugin source folders are not part of the website; never trace them.
   outputFileTracingExcludes: {
-    "*": ["./qgis_dashboards/**"],
+    "*": ["./plugins/**"],
   },
 };
 

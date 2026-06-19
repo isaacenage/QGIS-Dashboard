@@ -1,5 +1,6 @@
 // The brand mark: three ascending gradient parallelograms (blue → amber →
-// green), ported verbatim from the plugin's LOGO_SVG (qgis_dashboards/icons.py).
+// green), ported verbatim from the plugin's LOGO_SVG
+// (plugins/qgis_dashboards/icons.py).
 // Gradient ids are suffixed so multiple instances on one page don't collide.
 
 let counter = 0;

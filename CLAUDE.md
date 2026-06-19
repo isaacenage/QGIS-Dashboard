@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A QGIS desktop plugin that builds **ArcGIS-Dashboards-style interactive dashboards** from a QGIS project's vector layers. The user adds data-driven tiles (indicators, charts, lists, a live map, selectors) into a dockable panel; selecting a value in one tile **cross-filters every other tile** in real time. Dashboard layout and configuration are saved inside the `.qgz` project file.
 
-The shippable plugin lives in **`qgis_dashboards/`** — a QGIS Plugin Builder scaffold whose generated dialog skeleton was replaced with a real dashboard implementation (a dock widget + a signal bus + pluggable element types). Keep the Plugin Builder structure intact (it is what makes the plugin install cleanly and pass `plugins.qgis.org` validation); add features as new modules within it.
+The shippable plugin lives in **`plugins/qgis_dashboards/`** — a QGIS Plugin Builder scaffold whose generated dialog skeleton was replaced with a real dashboard implementation (a dock widget + a signal bus + pluggable element types). Keep the Plugin Builder structure intact (it is what makes the plugin install cleanly and pass `plugins.qgis.org` validation); add features as new modules within it.
 
-> Historical note: an earlier hand-written prototype lived in `qgisdashboardmvp/`. Its architecture worked but was not Plugin-Builder-shaped, so it failed to install cleanly. It has been folded into `qgis_dashboards/` and removed. Do not recreate a parallel plugin folder.
+> Historical note: an earlier hand-written prototype lived in `qgisdashboardmvp/`. Its architecture worked but was not Plugin-Builder-shaped, so it failed to install cleanly. It has been folded into `plugins/qgis_dashboards/` and removed. Do not recreate a parallel plugin folder.
 
 ## Architecture (the big picture)
 
@@ -82,22 +82,22 @@ This is a QGIS/PyQt5 plugin; there is no app build. "Running" means loading it i
 
 ```bash
 # Syntax-check everything (no QGIS needed — catches typos fast)
-cd qgis_dashboards && python -m py_compile __init__.py main_plugin.py window.py bus.py \
+cd plugins/qgis_dashboards && python -m py_compile __init__.py main_plugin.py window.py bus.py \
   theme.py icons.py sidebar.py dashboard_canvas.py page_view.py zoom_fit.py add_element_dialog.py element_picker.py settings_dialog.py \
   appearance_dialog.py connections_dialog.py export_dialog.py project_io.py recent_store.py \
   start_view.py layout_util.py export/*.py elements/*.py
 
 # Run the pure-module tests without QGIS (run each file directly so the test
 # package __init__ — which imports qgis — is not loaded):
-cd qgis_dashboards && PYTHONPATH=$(pwd) python test/test_html_export.py
-cd qgis_dashboards && PYTHONPATH=$(pwd) python test/test_project_io.py     # .qdash file I/O
-cd qgis_dashboards && PYTHONPATH=$(pwd) python test/test_recent_store.py   # recents helpers
-cd qgis_dashboards && python test/test_header_layout.py                    # header banner export geometry
-cd qgis_dashboards && PYTHONPATH=$(pwd) python test/test_zoom_fit.py        # fit-to-region Reset Zoom math
-cd qgis_dashboards && PYTHONPATH=$(pwd) python test/test_layout_util.py     # Build/Use lock-mode default
-cd qgis_dashboards && PYTHONPATH=$(pwd) python test/test_map_identify.py    # map identify geometry/summary
+cd plugins/qgis_dashboards && PYTHONPATH=$(pwd) python test/test_html_export.py
+cd plugins/qgis_dashboards && PYTHONPATH=$(pwd) python test/test_project_io.py     # .qdash file I/O
+cd plugins/qgis_dashboards && PYTHONPATH=$(pwd) python test/test_recent_store.py   # recents helpers
+cd plugins/qgis_dashboards && python test/test_header_layout.py                    # header banner export geometry
+cd plugins/qgis_dashboards && PYTHONPATH=$(pwd) python test/test_zoom_fit.py        # fit-to-region Reset Zoom math
+cd plugins/qgis_dashboards && PYTHONPATH=$(pwd) python test/test_layout_util.py     # Build/Use lock-mode default
+cd plugins/qgis_dashboards && PYTHONPATH=$(pwd) python test/test_map_identify.py    # map identify geometry/summary
 # Syntax-check the browser runtime (needs node, optional):
-node --check qgis_dashboards/export/assets/runtime.js
+node --check plugins/qgis_dashboards/export/assets/runtime.js
 
 # Install for manual testing: copy (or symlink) the plugin folder into the
 # QGIS plugins directory, then enable "QGIS Dashboard" in Plugins > Manage.
@@ -106,16 +106,16 @@ node --check qgis_dashboards/export/assets/runtime.js
 #   macOS:   ~/Library/Application Support/QGIS/QGIS3/profiles/default/python/plugins/
 
 # Compile Qt resources (OPTIONAL — only if you want the :/plugins/... icon path)
-cd qgis_dashboards && pyrcc5 -o resources.py resources.qrc
+cd plugins/qgis_dashboards && pyrcc5 -o resources.py resources.qrc
 
 # Run the test suite (needs a sourced QGIS env; uses nose)
-cd qgis_dashboards && make test
+cd plugins/qgis_dashboards && make test
 #   On Linux first: source scripts/run-env-linux.sh <path-to-qgis-install>
 # Or run one module directly once QGIS is on PYTHONPATH:
-cd qgis_dashboards && PYTHONPATH=$(pwd) python -m pytest test/test_dashboard.py -v
+cd plugins/qgis_dashboards && PYTHONPATH=$(pwd) python -m pytest test/test_dashboard.py -v
 
 # Package a release zip (requires git + pb_tool or make)
-cd qgis_dashboards && pb_tool zip        # or: make package VERSION=<tag>
+cd plugins/qgis_dashboards && pb_tool zip        # or: make package VERSION=<tag>
 ```
 
 Tests import plugin modules by bare name (e.g. `from bus import DashboardBus`), so they expect the plugin directory itself on `PYTHONPATH` (which `make test` sets). GUI-touching tests bootstrap QGIS through `test/utilities.py → get_qgis_app()`.

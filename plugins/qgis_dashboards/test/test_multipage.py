@@ -551,25 +551,21 @@ class WindowHeaderTest(unittest.TestCase):
         other_types = [t.element.type_name for t in other.canvas.tiles()]
         self.assertNotIn("header", other_types)
 
-    def test_header_banner_height_control(self):
-        """The header Configure form exposes a Banner height row that drives the
-        tile's pixel height (geometry), never the element config."""
-        from add_element_dialog import ElementConfigForm
+    def test_header_size_control_in_appearance(self):
+        """The header's banner height is now the generic Tile-size control in
+        the Tile Appearance panel (geometry, never the element config)."""
+        from tile_style_form import TileStyleForm
         win = self._win()
         win.add_element("header", {"title": "Brand"})
         tile = next(t for t in win.current_page().canvas.tiles()
                     if t.element.type_name == "header")
-        start_h = tile.grid_rect()[3]
+        start_w, start_h = tile.grid_rect()[2:4]
 
-        # the form surfaces a Banner height row seeded from the tile geometry
-        form = ElementConfigForm(element=tile.element)
-        self.assertIsNotNone(form.banner_height_spin)
-        self.assertEqual(form.banner_height(), start_h)
-        # height is geometry, not config — it must not leak into the config dict
-        self.assertNotIn("banner_height", form.managed_keys())
-        _t, cfg = form.result_config()
-        self.assertNotIn("banner_height", cfg)
-        self.assertNotIn("height", cfg)
+        # the Tile-size control is seeded from the tile geometry
+        form = TileStyleForm(tile.element, win.bus.theme)
+        self.assertEqual(form.tile_size(), (start_w, start_h))
+        # size is geometry, not style — it never leaks into the override dict
+        self.assertNotIn("__size__", form.result_override() or {})
 
         # applying a height resizes the tile exactly (taller, then a thin band —
         # no MIN_TILE floor, so banners shorter than a normal tile are allowed)

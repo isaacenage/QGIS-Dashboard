@@ -17,7 +17,7 @@ import os
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtGui import QPixmap, QMovie, QImage, QPainter
 from qgis.PyQt.QtWidgets import QLabel
-from .base import DashboardElement
+from .base import DashboardElement, _ALIGN
 
 try:
     from qgis.PyQt.QtSvg import QSvgRenderer
@@ -66,6 +66,16 @@ class ImageElement(DashboardElement):
             self._load_pixmap(path)
         self._render()
 
+    # ---- appearance ----
+
+    def _restyle(self):
+        th = self.effective_theme()
+        align = self.style_get("img_align", "center")
+        self._label.setAlignment(_ALIGN.get(align, Qt.AlignmentFlag.AlignCenter))
+        self._label.setStyleSheet(
+            "color:{}; background:transparent;".format(th.text_muted))
+        self._render()
+
     def _clear_sources(self):
         if self._movie is not None:
             self._movie.stop()
@@ -109,7 +119,7 @@ class ImageElement(DashboardElement):
         size = self._target_size()
         if size.width() <= 0 or size.height() <= 0:
             return
-        stretch = self.config.get("fit") == "stretch"
+        stretch = self.style_get("fit", "contain") == "stretch"
         mode = Qt.AspectRatioMode.IgnoreAspectRatio if stretch else Qt.AspectRatioMode.KeepAspectRatio
         if self._pixmap is not None:
             self._label.setPixmap(self._pixmap.scaled(

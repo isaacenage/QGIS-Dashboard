@@ -79,6 +79,13 @@ class ChartElement(DashboardElement):
 
     def _restyle(self):
         self.view.set_theme(self.effective_theme())
+        # per-tile Plot-role overrides (axis/label color + font, value labels)
+        self.view.set_style({
+            "axis_color": self.style_get("axis_color"),
+            "axis_font": self.style_get("axis_font"),
+            "axis_px": self.style_get("axis_px"),
+            "show_value_labels": self.style_get("show_value_labels", True),
+        })
 
     # ---- data ----
 
@@ -131,7 +138,7 @@ class ChartElement(DashboardElement):
                 out.append((k, sum(vals) / len(vals) if vals else 0))
         out.sort(key=lambda x: x[1], reverse=True)
 
-        cap = self.config.get("max_categories") or spec.get("default_cap", 12)
+        cap = self.style_get("max_categories", spec.get("default_cap", 12))
         return fold_categories(out, int(cap), spec.get("fold_other", False))
 
     def _produce(self):
@@ -139,7 +146,8 @@ class ChartElement(DashboardElement):
         shape = self._shape()
         cfg = self.config
         if shape == "series":
-            cap = int(cfg.get("max_categories") or self._spec().get("default_cap", 10))
+            cap = int(self.style_get("max_categories",
+                                     self._spec().get("default_cap", 10)))
             return chart_data.aggregate_series(
                 self._rows([cfg.get("category_field"), cfg.get("series_field"),
                             cfg.get("value_field")]),

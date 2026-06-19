@@ -36,6 +36,7 @@ class TextElement(DashboardElement):
         # this tile *is* its text — drop the base title / description chrome
         self.title_label.hide()
         self.desc_label.hide()
+        self._has_base_title = False   # the body label carries all styling
 
         self._label = QLabel("")
         self._label.setObjectName("textTile")
@@ -51,25 +52,24 @@ class TextElement(DashboardElement):
 
     def refresh(self):
         text = self.config.get("text", "")
-        align = self.config.get("align", "left")
-        self._label.setAlignment(_ALIGN.get(align, _ALIGN["left"]))
         self._label.setText(text or _PLACEHOLDER)
         self._restyle()
 
     def _restyle(self):
         th = self.effective_theme()
-        is_heading = bool(self.config.get("heading"))
-        is_empty = not self.config.get("text")
-        size = int(round(th.title_size * 1.7)) if is_heading else th.font_size
-        weight = 700 if is_heading else 400
-        # muted, lighter weight while empty so the placeholder reads as a hint
-        color = th.text_muted if is_empty else th.text
-        self._label.setStyleSheet(
-            "color:{color}; font-family:{family}; font-size:{size}px;"
-            "font-weight:{weight}; font-style:{style}; background:transparent;".format(
-                color=color, family=th.font_stack(), size=size,
-                weight=400 if is_empty else weight,
-                style="italic" if is_empty else "normal"))
+        align = self.style_get("text_align", "left")
+        self._label.setAlignment(_ALIGN.get(align, _ALIGN["left"]))
+        if not self.config.get("text"):
+            # placeholder hint: muted + italic, regardless of overrides
+            self._label.setStyleSheet(
+                "color:{color}; font-family:{family}; font-size:{size}px;"
+                " font-weight:400; font-style:italic; background:transparent;"
+                .format(color=th.text_muted, family=th.font_stack(),
+                        size=th.font_size))
+            return
+        # full text role: font / size / color / weight / italic (align set above)
+        self.apply_text_role(self._label, "text", color=th.text,
+                             font=th.font_family, size=th.font_size, weight=400)
 
     # ---- in-place editing ----
 

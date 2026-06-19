@@ -20,6 +20,7 @@ Appearance:
 
 import uuid
 
+from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtGui import QPainterPath, QRegion
 from qgis.PyQt.QtWidgets import QFrame, QVBoxLayout, QLabel
 from qgis.core import (
@@ -29,6 +30,18 @@ from qgis.core import (
     QgsExpressionContext,
     QgsExpressionContextUtils,
 )
+
+from .style_migrate import migrate_element_style
+
+# Appended after a chosen family so a per-tile role font degrades gracefully
+# (mirrors theme.Theme._FONT_FALLBACK).
+_FONT_FALLBACK = '"Segoe UI", "Helvetica Neue", Arial, sans-serif'
+
+_ALIGN = {
+    "left": Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+    "center": Qt.AlignmentFlag.AlignCenter,
+    "right": Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+}
 
 
 class DashboardElement(QFrame):
@@ -51,6 +64,13 @@ class DashboardElement(QFrame):
         self.config = config or {}
         self.id = self.config.get("id") or uuid.uuid4().hex[:8]
         self.config["id"] = self.id
+        # relocate any legacy top-level visual keys into config["style"] so the
+        # per-tile appearance system reads them uniformly via style_get().
+        migrate_element_style(self.config, self.type_name,
+                              getattr(self.bus, "theme", None))
+        # elements with the shared title chrome (not full-bleed, not a tile that
+        # renders its own heading like text/header) get per-tile title styling.
+        self._has_base_title = not self.full_bleed
         # content-interaction mode (Use vs Build): True == Use mode, contents
         # react to the user (cross-filter clicks, map pan/identify); False ==
         # Build mode, contents inert so tiles can be moved/resized/configured.
@@ -115,10 +135,64 @@ class DashboardElement(QFrame):
     def effective_theme(self):
         return self.bus.theme.merged_with(self.config.get("style"))
 
+    def style_get(self, key, default=None):
+        """Read a per-tile style override value (``config["style"]``).
+
+        An absent key — or one cleared to ``None``/``""`` — yields *default*, so
+        an untouched role tracks the theme-derived fallback the caller passes.
+        """
+        style = self.config.get("style")
+        if isinstance(style, dict):
+            val = style.get(key)
+            if val not in (None, ""):
+                return val
+        return default
+
+    def apply_text_role(self, label, prefix, *, color, font, size,
+                        weight=400, italic=False, align=None, force_color=None):
+        """Apply a styled text *role* to *label* from ``config["style"]``.
+
+        Reads ``{prefix}_color/_font/_px/_weight/_italic`` (and ``_align`` when
+        *align* is given), each falling back to the theme-derived value passed
+        in, and sets one inline stylesheet so the role wins over the inherited
+        tile QSS. Keeps every element's role styling DRY. ``force_color`` wins
+        over the role/theme color (used by the indicator's trend coloring).
+        """
+        c = force_color or self.style_get(prefix + "_color", color)
+        fam = self.style_get(prefix + "_font", font)
+        px = int(self.style_get(prefix + "_px", size) or size)
+        w = int(self.style_get(prefix + "_weight", weight) or weight)
+        it = bool(self.style_get(prefix + "_italic", italic))
+        label.setStyleSheet(
+            'color:{c}; font-family:"{f}", {fb}; font-size:{px}px;'
+            ' font-weight:{w}; font-style:{st}; background:transparent;'.format(
+                c=c, f=fam, fb=_FONT_FALLBACK, px=px, w=w,
+                st="italic" if it else "normal"))
+        if align is not None:
+            a = self.style_get(prefix + "_align", align)
+            label.setAlignment(_ALIGN.get(a, _ALIGN["left"]))
+        return label
+
     def apply_theme(self):
         self.setStyleSheet(self.effective_theme().tile_qss())
         self._update_fullbleed_mask()
+        self._style_base_title()
         self._restyle()
+
+    def _style_base_title(self):
+        """Style the shared ``#elementTitle`` from the per-tile ``title_*`` role.
+
+        Defaults reproduce the tile-QSS heading look (theme text color / heading
+        family / title size / weight 600) so untouched tiles are unchanged.
+        Elements that render their own heading (text/header) or are full-bleed
+        opt out via ``_has_base_title``.
+        """
+        if not getattr(self, "_has_base_title", False):
+            return
+        th = self.effective_theme()
+        self.apply_text_role(self.title_label, "title", color=th.text,
+                             font=th.heading_family(), size=th.title_size,
+                             weight=600, italic=False, align="left")
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

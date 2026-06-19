@@ -8,6 +8,7 @@ emits a featureAction so the map element can zoom/flash to it.
 
 from qgis.PyQt.QtWidgets import QTableWidget, QTableWidgetItem, QAbstractItemView
 from .base import DashboardElement
+from .table_style import table_qss
 
 
 class ListElement(DashboardElement):
@@ -19,12 +20,17 @@ class ListElement(DashboardElement):
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.itemSelectionChanged.connect(self._on_row)
         self.body.addWidget(self.table)
         self._fids = []
         self.apply_theme()
         self.refresh()
+
+    def _restyle(self):
+        self.table.setStyleSheet(table_qss(self, self.effective_theme(),
+                                           selection=True))
 
     def refresh(self):
         fields = self.config.get("display_fields", [])
@@ -35,7 +41,7 @@ class ListElement(DashboardElement):
         self.table.setColumnCount(len(fields))
         self.table.setHorizontalHeaderLabels(fields)
         rows = list(self.iter_features())
-        limit = self.config.get("max_rows", 200)
+        limit = int(self.style_get("rows_shown", 200))
         rows = rows[:limit]
         self._fids = [f.id() for f in rows]
         self.table.setRowCount(len(rows))

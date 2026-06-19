@@ -37,15 +37,59 @@ _OPTIONAL_TILE_KEYS = (
 )
 
 
+# The per-tile appearance system stores visual settings under ``config["style"]``
+# (some renamed away from theme.OVERRIDE_KEYS). The browser runtime still reads
+# the original top-level names, so hoist those values back up at export time —
+# this keeps the existing export features working without touching runtime.js.
+# (New per-role keys — colors/weights/per-role fonts/table styling — are not yet
+# mirrored in the runtime; that parity is a deferred follow-up.)
+_STYLE_TO_LEGACY = {
+    "value_px": "value_size",
+    "icon_size": "icon_size",
+    "icon_position": "icon_position",
+    "animation": "animation",
+    "animation_duration_ms": "animation_duration_ms",
+    "rows_shown": "max_rows",
+    "cols_shown": "max_cols",
+    "max_categories": "max_categories",
+    "logo_size": "logo_size",
+    "logo_slot": "logo_slot",
+    "title_font": "font_family",
+    "title_align": "align",
+    "text_align": "align",
+}
+
+
+def _hoist_legacy_style(out):
+    """Copy relocated style values back to the legacy top-level names the
+    browser runtime reads (without overwriting an explicit top-level value)."""
+    style = out.get("style")
+    if not isinstance(style, dict):
+        return
+    for skey, ckey in _STYLE_TO_LEGACY.items():
+        val = style.get(skey)
+        if val not in (None, "") and ckey not in out:
+            out[ckey] = val
+    try:
+        if int(style.get("text_weight", 0)) >= 600:
+            out.setdefault("heading", True)
+    except (TypeError, ValueError):
+        pass
+
+
 def clean_config(config):
     """Return a JSON-safe copy of an element config for embedding.
 
     ``id`` is dropped (it is carried on the tile itself); every other key is
-    kept so the browser renderer sees the same binding the plugin used.
+    kept so the browser renderer sees the same binding the plugin used. Visual
+    settings stored under ``style`` are also surfaced under their legacy
+    top-level names for the browser runtime.
     """
     if not config:
         return {}
-    return {k: v for k, v in config.items() if k != "id"}
+    out = {k: v for k, v in config.items() if k != "id"}
+    _hoist_legacy_style(out)
+    return out
 
 
 def build_tile(tile):

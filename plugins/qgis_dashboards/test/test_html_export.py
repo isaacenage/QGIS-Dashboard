@@ -17,6 +17,39 @@ import unittest
 from export.serialize import (
     build_model, build_tile, build_page, clean_config, EXPORT_VERSION,
 )
+
+
+class CleanConfigStyleHoistTest(unittest.TestCase):
+    """Relocated per-tile style values surface under the legacy names the
+    browser runtime reads, so export keeps working after the appearance split."""
+
+    def test_renamed_keys_hoisted(self):
+        cfg = clean_config({"id": "x", "style": {
+            "value_px": 48, "rows_shown": 25, "cols_shown": 6,
+            "title_font": "Georgia", "text_align": "center"}})
+        self.assertEqual(cfg["value_size"], 48)
+        self.assertEqual(cfg["max_rows"], 25)
+        self.assertEqual(cfg["max_cols"], 6)
+        self.assertEqual(cfg["font_family"], "Georgia")
+        self.assertEqual(cfg["align"], "center")
+
+    def test_same_name_keys_hoisted(self):
+        cfg = clean_config({"style": {"icon_size": 32, "animation": "fade",
+                                      "max_categories": 5, "logo_slot": "right"}})
+        self.assertEqual(cfg["icon_size"], 32)
+        self.assertEqual(cfg["animation"], "fade")
+        self.assertEqual(cfg["max_categories"], 5)
+        self.assertEqual(cfg["logo_slot"], "right")
+
+    def test_heading_reconstructed_from_weight(self):
+        cfg = clean_config({"style": {"text_weight": 700}})
+        self.assertTrue(cfg["heading"])
+        cfg2 = clean_config({"style": {"text_weight": 400}})
+        self.assertNotIn("heading", cfg2)
+
+    def test_explicit_top_level_wins(self):
+        cfg = clean_config({"max_rows": 99, "style": {"rows_shown": 25}})
+        self.assertEqual(cfg["max_rows"], 99)
 from export.theme_css import theme_to_css_vars
 from export.html_builder import build_html, embed_json
 from export.basemap import xyz_template_to_leaflet, OSM_BASEMAP

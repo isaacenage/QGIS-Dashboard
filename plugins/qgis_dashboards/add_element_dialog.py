@@ -111,11 +111,10 @@ class ElementConfigForm(QWidget):
 
         # dynamic rows live in this dict so we can clear them on type change
         self._dyn = {}
-        # non-config rows (e.g. the header's "Banner height", which edits the
-        # tile's geometry rather than the element config) — tracked separately
-        # so they are NOT reported by result_config()/managed_keys().
+        # non-config rows (kept for forms that need a control which is not a
+        # managed config key) — tracked separately so they are NOT reported by
+        # result_config()/managed_keys().
         self._extra_rows = []
-        self.banner_height_spin = None
         # the chart section's field rows depend on the selected chart_type; this
         # holds the type across a rebuild so switching it keeps the selection.
         self._pending_chart_type = None
@@ -150,7 +149,6 @@ class ElementConfigForm(QWidget):
             w.deleteLater()
         self._dyn = {}
         self._extra_rows = []
-        self.banner_height_spin = None
 
     def _add_dyn(self, key, label, widget):
         # combos (incl. field/font pickers) would otherwise size to their
@@ -202,38 +200,17 @@ class ElementConfigForm(QWidget):
         t = self.type_combo.currentData()
         self._set_layer_row_visible(t not in _LAYERLESS_TYPES)
         if t == "text":
+            # text *content* is data; its typography/alignment live in the
+            # Tile Appearance panel now.
             self._add_dyn("text", "Text", QPlainTextEdit())
-            align = QComboBox()
-            align.addItem("Left", "left")
-            align.addItem("Center", "center")
-            align.addItem("Right", "right")
-            self._add_dyn("align", "Alignment", align)
-            heading = QCheckBox()
-            self._add_dyn("heading", "Heading style", heading)
         elif t == "image":
+            # the image *file* is data; scaling/alignment live in Tile Appearance.
             self._add_dyn("path", "Image file", _PathPicker())
-            fit = QComboBox()
-            fit.addItem("Fit (keep aspect)", "contain")
-            fit.addItem("Stretch to fill", "stretch")
-            self._add_dyn("fit", "Scaling", fit)
         elif t == "header":
-            # the top-level "Title" row doubles as the banner text
-            self._add_dyn("font_family", "Font", QFontComboBox())
-            self._add_dyn("font_size", "Font size (px)", self._spin(8, 200, 22))
-            align = QComboBox()
-            align.addItem("Left", "left")
-            align.addItem("Center", "center")
-            align.addItem("Right", "right")
-            self._add_dyn("align", "Text alignment", align)
+            # the top-level "Title" row is the banner text (data); the banner's
+            # fonts/colors/alignment and logo size/position live in Tile
+            # Appearance, and the banner height is the generic tile size there.
             self._add_dyn("logo_path", "Logo image (opt)", _PathPicker())
-            slot = QComboBox()
-            slot.addItem("Left of title", "left")
-            slot.addItem("Right of title", "right")
-            slot.addItem("Above title", "above")
-            slot.addItem("Below title", "below")
-            self._add_dyn("logo_slot", "Logo position", slot)
-            self._add_dyn("logo_size", "Logo size (px)", self._spin(12, 400, 40))
-            self._add_banner_height()
         elif t == "indicator":
             self._add_dyn("value_expression", "Value expression",
                           QLineEdit("count(1)"))
@@ -244,22 +221,9 @@ class ElementConfigForm(QWidget):
             self._add_dyn("suffix", "Value suffix", QLineEdit(""))
             self._add_dyn("decimals", "Decimal places", self._spin(0, 6, 0))
             self._add_dyn("no_value_text", "No-data text", QLineEdit("No data"))
-            self._add_dyn("value_size", "Value text size (px)",
-                          self._spin(8, 200, 30))
             self._add_dyn("icon_path", "Icon image (opt)", _PathPicker())
-            icon_pos = QComboBox()
-            icon_pos.addItem("Left of value", "left")
-            icon_pos.addItem("Right of value", "right")
-            icon_pos.addItem("Above value", "top")
-            self._add_dyn("icon_position", "Icon position", icon_pos)
-            self._add_dyn("icon_size", "Icon size (px)", self._spin(12, 256, 48))
-            anim = QComboBox()
-            anim.addItem("None", "none")
-            anim.addItem("Odometer count-up", "odometer")
-            anim.addItem("Rolling digits", "rolling")
-            anim.addItem("Typewriter", "typewriter")
-            anim.addItem("Fade / flash", "fade")
-            self._add_dyn("animation", "Value animation", anim)
+            # value text size, icon size/position and the value animation are
+            # styling — configured from the Tile Appearance panel.
         elif t == "map":
             extent = QCheckBox()
             extent.setChecked(True)
@@ -344,36 +308,6 @@ class ElementConfigForm(QWidget):
             self._add_dyn("high_field", "High field", self._field_combo())
             self._add_dyn("low_field", "Low field", self._field_combo())
             self._add_dyn("close_field", "Close field", self._field_combo())
-
-    def _add_banner_height(self):
-        """Add the header's "Banner height" row when configuring a live tile.
-
-        The header is an ordinary canvas tile, so its height is tile geometry,
-        not element config. This spinner writes straight to the tile's pixel
-        height (seeded from it) — a numeric stand-in for dragging the tile's
-        resize handle. It is only shown when editing an existing header tile (it
-        needs a tile to read/resize); it is *not* a managed config key, so
-        result_config()/managed_keys() ignore it.
-        """
-        tile = getattr(self._element, "_grid_tile", None) if self._element else None
-        if tile is None:
-            return
-        spin = QSpinBox()
-        spin.setRange(40, 4000)
-        spin.setSingleStep(10)
-        spin.setSuffix(" px")
-        try:
-            spin.setValue(int(tile.grid_rect()[3]))
-        except (TypeError, ValueError, IndexError):
-            pass
-        spin.valueChanged.connect(lambda *_: self.changed.emit())
-        self.banner_height_spin = spin
-        self._extra_rows.append(spin)
-        self.form.addRow("Banner height", spin)
-
-    def banner_height(self):
-        """The chosen banner height in px, or ``None`` when no row is shown."""
-        return self.banner_height_spin.value() if self.banner_height_spin else None
 
     def _on_layer(self, _lyr):
         for w in self._dyn.values():
@@ -496,9 +430,6 @@ class AddElementDialog(QDialog):
 
     def managed_keys(self):
         return self._form.managed_keys()
-
-    def banner_height(self):
-        return self._form.banner_height()
 
     def result_config(self):
         return self._form.result_config()

@@ -10,7 +10,7 @@ down to a single value when other elements drive the dashboard.
 """
 
 from qgis.PyQt.QtWidgets import QComboBox
-from .base import DashboardElement
+from .base import DashboardElement, _FONT_FALLBACK
 
 
 class CategorySelectorElement(DashboardElement):
@@ -35,6 +35,27 @@ class CategorySelectorElement(DashboardElement):
         # user is arranging tiles. Use mode: live.
         super().set_interactive(on)
         self.combo.setEnabled(bool(on))
+
+    def _restyle(self):
+        # the dropdown control gets its own role styling (background / text /
+        # font / size / border / highlight) from the Tile Appearance panel.
+        th = self.effective_theme()
+        bg = self.style_get("combo_bg", th.surface_bg)
+        color = self.style_get("combo_color", th.text)
+        fam = self.style_get("combo_font", th.font_family)
+        px = int(self.style_get("combo_px", th.font_size))
+        border = self.style_get("combo_border", th.border)
+        accent = self.style_get("combo_accent", th.accent)
+        self.combo.setStyleSheet(
+            'QComboBox {{ background:{bg}; color:{c}; border:1px solid {b};'
+            ' border-radius:8px; padding:5px 9px; min-height:28px;'
+            ' font-family:"{f}", {fb}; font-size:{px}px; }}'
+            'QComboBox:focus {{ border:1px solid {a}; }}'
+            'QComboBox QAbstractItemView {{ background:{bg}; color:{c};'
+            ' border:1px solid {b}; selection-background-color:{a};'
+            ' selection-color:#ffffff; }}'.format(
+                bg=bg, c=color, b=border, a=accent, f=fam, fb=_FONT_FALLBACK,
+                px=px))
 
     def refresh(self):
         # Repopulate values WITHOUT applying the dashboard filter, otherwise the

@@ -57,7 +57,7 @@ from .elements.header_layout import materialize_header_tiles
 from .add_element_dialog import AddElementDialog, ElementConfigForm
 from .element_picker import ElementPicker
 from .settings_dialog import SettingsDialog
-from .appearance_dialog import AppearanceForm
+from .tile_style_form import TileStyleForm
 from .connections_dialog import ConnectionsForm
 from .side_panel import InspectorPanel
 
@@ -819,10 +819,6 @@ class DashboardWindow(QMainWindow):
         """
         original = dict(element.config)
         form = ElementConfigForm(element=element)
-        # the header's "Banner height" edits tile geometry, not config — snapshot
-        # the tile's height so Cancel can restore it (None for non-header tiles).
-        tile = getattr(element, "_grid_tile", None)
-        original_height = tile.grid_rect()[3] if tile is not None else None
 
         def do_apply():
             _type, cfg = form.result_config()
@@ -835,9 +831,6 @@ class DashboardWindow(QMainWindow):
             new_config["id"] = element.id
             element.config = new_config
             element.reconfigure()
-            h = form.banner_height()
-            if h is not None and tile is not None:
-                tile.set_height_px(h)
 
         debounce = self._make_debounce(do_apply)
         form.changed.connect(lambda: debounce.start())
@@ -851,8 +844,6 @@ class DashboardWindow(QMainWindow):
             debounce.stop()
             element.config = original
             element.reconfigure()
-            if original_height is not None and tile is not None:
-                tile.set_height_px(original_height)
             self._schedule_history()   # reverts to baseline → deduped to a no-op
 
         self._inspector.open_editor(
@@ -860,11 +851,18 @@ class DashboardWindow(QMainWindow):
             form, on_commit=commit, on_cancel=cancel, subject=element)
 
     def _edit_tile_style(self, element):
-        """Edit one tile's appearance override in the inspector, live."""
-        seed = self.bus.theme.merged_with(element.config.get("style"))
+        """Edit one tile's appearance override in the inspector, live.
+
+        The schema-driven :class:`TileStyleForm` shows only the roles the
+        element type has; it writes a **sparse** override (only fields changed
+        from the global theme) to ``config["style"]`` and edits the tile's pixel
+        size separately. Cancel restores both the style override and the size.
+        """
         style = element.config.get("style")
         original = dict(style) if isinstance(style, dict) else None
-        form = AppearanceForm(seed, mode="element")
+        tile = getattr(element, "_grid_tile", None)
+        original_size = tile.grid_rect()[2:4] if tile is not None else None
+        form = TileStyleForm(element, self.bus.theme)
 
         def live():
             if form.is_cleared():
@@ -876,6 +874,9 @@ class DashboardWindow(QMainWindow):
                 else:
                     element.config.pop("style", None)
             element.apply_theme()
+            size = form.tile_size()
+            if size is not None and tile is not None:
+                tile.set_size_px(size[0], size[1])
 
         form.changed.connect(live)
 
@@ -889,6 +890,8 @@ class DashboardWindow(QMainWindow):
             else:
                 element.config.pop("style", None)
             element.apply_theme()
+            if original_size is not None and tile is not None:
+                tile.set_size_px(original_size[0], original_size[1])
             self._schedule_history()   # reverts to baseline → deduped to a no-op
 
         self._inspector.open_editor(

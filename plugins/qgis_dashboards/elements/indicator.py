@@ -50,6 +50,7 @@ class IndicatorElement(DashboardElement):
         self.body.addWidget(self.bottom)
         self.body.addStretch(1)
 
+        self._delta_sign = 0   # last reference delta sign, for trend coloring
         self.apply_theme()
         self.refresh()
 
@@ -73,8 +74,26 @@ class IndicatorElement(DashboardElement):
 
     def _restyle(self):
         th = self.effective_theme()
-        size = int(self.config.get("value_size") or th.value_size)
-        self.value.apply_style(th.accent, size, th.heading_family())
+        # value role
+        size = int(self.style_get("value_px", th.value_size))
+        color = self.style_get("value_color", th.accent)
+        family = self.style_get("value_font", th.heading_family())
+        weight = int(self.style_get("value_weight", 700))
+        italic = bool(self.style_get("value_italic", False))
+        self.value.apply_style(color, size, family, weight, italic)
+        # top label role
+        self.apply_text_role(self.top, "top", color=th.text_muted,
+                             font=th.font_family, size=th.font_size, weight=400)
+        # reference / trend role — trend colors win when there is a delta
+        if self._delta_sign > 0:
+            force = self.style_get("trend_up_color", "#13a10e")
+        elif self._delta_sign < 0:
+            force = self.style_get("trend_down_color", "#d13438")
+        else:
+            force = None
+        self.apply_text_role(self.bottom, "ref", color=th.text_muted,
+                             font=th.font_family, size=th.font_size, weight=400,
+                             force_color=force)
 
     def _rebuild_value_host(self, position, has_icon):
         self._vgrid.removeWidget(self.icon)
@@ -97,38 +116,38 @@ class IndicatorElement(DashboardElement):
     # ---- data ----
 
     def refresh(self):
-        # keep value styling current (cheap; also covers theme/config changes)
-        self._restyle()
-
         value = self.evaluate(self.config.get("value_expression", "count(1)"))
         text = self._fmt(value)
 
-        # optional icon
+        # optional icon (icon image is content; size/position are style)
         path = self.config.get("icon_path")
-        pixmap = icon_pixmap(path, self.config.get("icon_size", 48)) if path else None
+        icon_size = int(self.style_get("icon_size", 48))
+        pixmap = icon_pixmap(path, icon_size) if path else None
         has_icon = pixmap is not None
         if has_icon:
             self.icon.setPixmap(pixmap)
-        self._rebuild_value_host(self.config.get("icon_position", "left"), has_icon)
+        self._rebuild_value_host(self.style_get("icon_position", "left"), has_icon)
 
-        # animated value
+        # animated value (animation type + duration are style)
         self.value.set_options(
-            self.config.get("animation", ""),
-            self.config.get("animation_duration_ms", 900),
+            self.style_get("animation", ""),
+            int(self.style_get("animation_duration_ms", 900)),
             self._fmt)
         self.value.set_value(value if isinstance(value, (int, float)) else None, text)
 
         # reference value + delta, like ArcGIS reference/trend
+        self._delta_sign = 0
         ref_expr = self.config.get("reference_expression")
         if ref_expr and value is not None:
             ref = self.evaluate(ref_expr)
             if ref is not None and isinstance(value, (int, float)):
                 delta = value - ref
+                self._delta_sign = 1 if delta > 0 else (-1 if delta < 0 else 0)
                 arrow = "▲" if delta > 0 else ("▼" if delta < 0 else "—")
                 self.bottom.setText("{} {} vs ref".format(arrow, self._fmt(abs(delta))))
-                self.bottom.setProperty(
-                    "trend",
-                    "up" if delta > 0 else "down" if delta < 0 else "flat")
         self.top.setText(self.config.get("top_text", ""))
         self.top.setVisible(bool(self.config.get("top_text")))
         self.bottom.setVisible(bool(ref_expr))
+
+        # restyle last so the value/labels reflect the new delta sign + theme
+        self._restyle()

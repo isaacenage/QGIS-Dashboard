@@ -50,6 +50,7 @@ class _ChartPainter(QWidget):
         self._text = QColor("#1b2733")
         self._muted = QColor("#6b7682")
         self._grid = QColor("#e3e8ee")
+        self._show_values = True   # draw value labels (Plot appearance role)
         self.setMinimumHeight(160)
 
     def set_theme(self, theme):
@@ -60,6 +61,25 @@ class _ChartPainter(QWidget):
         self._text = QColor(theme.text)
         self._muted = QColor(theme.text_muted)
         self._grid = QColor(getattr(theme, "grid_line", "#e3e8ee"))
+        self.update()
+
+    def set_style(self, style):
+        """Apply per-tile Plot-role overrides (axis/label color, font, value
+        labels). Called after :meth:`set_theme`; absent keys keep theme values.
+        """
+        ac = style.get("axis_color")
+        if ac:
+            self._muted = QColor(ac)
+        fam = style.get("axis_font")
+        px = style.get("axis_px")
+        if fam or px:
+            f = self.font()
+            if fam:
+                f.setFamily(str(fam))
+            if px:
+                f.setPixelSize(int(px))
+            self.setFont(f)
+        self._show_values = bool(style.get("show_value_labels", True))
         self.update()
 
     def set_data(self, data, selected=None, inner=0.0):
@@ -116,9 +136,11 @@ class BarPainter(_ChartPainter):
             y = plot_bottom - h
             color = self._bar_sel if cat == self._selected else self._color(i)
             p.fillRect(QRectF(slot_left + (slot_w - bar_w) / 2, y, bar_w, h), color)
-            p.setPen(self._text)
-            p.drawText(QRectF(slot_left, y - top_pad, slot_w, top_pad),
-                       Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom, fmt_num(v))
+            if self._show_values:
+                p.setPen(self._text)
+                p.drawText(QRectF(slot_left, y - top_pad, slot_w, top_pad),
+                           Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
+                           fmt_num(v))
             cat_txt = fm.elidedText(str(cat), Qt.TextElideMode.ElideRight, int(slot_w))
             p.setPen(self._muted)
             p.drawText(QRectF(slot_left, plot_bottom + 2, slot_w, label_h),
@@ -171,9 +193,11 @@ class BarHPainter(_ChartPainter):
             p.drawText(QRectF(rect.left(), slot_top, label_w - 6, slot_h),
                        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, cat_txt)
             p.fillRect(QRectF(plot_left, y, w, bar_h), color)
-            p.setPen(self._text)
-            p.drawText(QRectF(plot_left + w + 4, slot_top, val_w - 6, slot_h),
-                       Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, fmt_num(v))
+            if self._show_values:
+                p.setPen(self._text)
+                p.drawText(QRectF(plot_left + w + 4, slot_top, val_w - 6, slot_h),
+                           Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                           fmt_num(v))
         p.end()
 
     def mousePressEvent(self, e):

@@ -45,11 +45,13 @@ class _RollingNumber(QWidget):
         self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._anim.valueChanged.connect(self._on_tick)
 
-    def configure(self, color, pixel_size, family):
+    def configure(self, color, pixel_size, family, weight=700, italic=False):
         self._color = QColor(color)
         f = QFont(family)
         f.setPixelSize(int(pixel_size))
-        f.setBold(True)
+        # setBold is used (not setWeight) for Qt5/Qt6 weight-scale portability.
+        f.setBold(int(weight) >= 600)
+        f.setItalic(bool(italic))
         self._font = f
         self.setMinimumHeight(int(pixel_size) + 8)
         self.update()
@@ -133,20 +135,25 @@ class IndicatorValue(QWidget):
         self._fade = None
 
     # ---- styling -------------------------------------------------------
-    def apply_style(self, color, pixel_size, family):
+    def apply_style(self, color, pixel_size, family, weight=700, italic=False):
         self._color = color
         self._pixel_size = int(pixel_size)
         self._family = family or "Inter"
+        weight = int(weight)
         f = QFont(self._family)
         f.setPixelSize(self._pixel_size)
-        f.setBold(True)
+        f.setBold(weight >= 600)
+        f.setItalic(bool(italic))
         self._label.setFont(f)
-        # Inline stylesheet on the label itself so the per-tile value size/color
-        # wins over the inherited #indValue rule from the tile stylesheet.
+        # Inline stylesheet on the label itself so the per-tile value
+        # size/color/weight wins over the inherited #indValue rule from the tile
+        # stylesheet.
         self._label.setStyleSheet(
-            "#indValue {{ color:{}; font-size:{}px; font-weight:700; }}".format(
-                color, self._pixel_size))
-        self._roll.configure(color, self._pixel_size, self._family)
+            "#indValue {{ color:{c}; font-size:{s}px; font-weight:{w};"
+            " font-style:{st}; }}".format(
+                c=color, s=self._pixel_size, w=weight,
+                st="italic" if italic else "normal"))
+        self._roll.configure(color, self._pixel_size, self._family, weight, italic)
 
     def set_options(self, mode, duration, formatter):
         self._mode = (mode or "").lower()

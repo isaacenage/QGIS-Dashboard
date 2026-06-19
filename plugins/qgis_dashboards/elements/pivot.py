@@ -14,12 +14,13 @@ header filters by that column value only. Clicking the same target again clears.
 from qgis.PyQt.QtWidgets import (
     QTableWidget, QTableWidgetItem, QAbstractItemView,
 )
-from qgis.PyQt.QtGui import QFont
+from qgis.PyQt.QtGui import QColor
 from qgis.PyQt.QtCore import Qt
 
 from .base import DashboardElement
 from .pivot_engine import compute_pivot, NULL_KEY
 from .chart_specs import filter_literal
+from .table_style import table_qss
 
 TOTAL_LABEL = "Total"
 
@@ -46,6 +47,7 @@ class PivotElement(DashboardElement):
         self.table = QTableWidget()
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.cellClicked.connect(self._on_cell)
         self.table.horizontalHeader().sectionClicked.connect(self._on_header)
@@ -54,6 +56,10 @@ class PivotElement(DashboardElement):
         self._selected = None   # the active filter key tuple, for toggle
         self.apply_theme()
         self.refresh()
+
+    def _restyle(self):
+        self.table.setStyleSheet(table_qss(self, self.effective_theme(),
+                                           selection=False))
 
     # ---- data ----
 
@@ -66,8 +72,8 @@ class PivotElement(DashboardElement):
             col_field=cfg.get("col_field") or None,
             value_field=cfg.get("value_field"),
             statistic=cfg.get("statistic", "count"),
-            max_rows=int(cfg.get("max_rows", 50) or 50),
-            max_cols=int(cfg.get("max_cols", 20) or 20),
+            max_rows=int(self.style_get("rows_shown", 50) or 50),
+            max_cols=int(self.style_get("cols_shown", 20) or 20),
         )
         self._result = result
         self._populate(result, show_totals)
@@ -130,6 +136,11 @@ class PivotElement(DashboardElement):
         if bold or header:
             f = item.font()
             f.setBold(True)
+            if bold:   # a totals cell — honor the Totals appearance role
+                weight = int(self.style_get("total_weight", 700))
+                f.setBold(weight >= 600)
+                item.setForeground(QColor(self.style_get(
+                    "total_color", self.effective_theme().text)))
             item.setFont(f)
         if header:
             item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)

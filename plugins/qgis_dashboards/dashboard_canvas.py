@@ -425,6 +425,39 @@ class GridTile(QFrame):
         else:
             self.canvas.place(self)   # snap back to current pixel rect
 
+    def set_width_px(self, w):
+        """Resize the tile to logical width *w* px, keeping its origin/height.
+
+        A numeric stand-in for dragging the east edge, used by the Tile
+        Appearance "Tile size" control. Clamped to the export region width and
+        **reverted on overlap** (unlike height, which pushes the stack), so a
+        width bump never collides with a neighbour. Returns ``True`` when applied.
+        """
+        region_w = self.canvas.region_size()[0]
+        lw = max(SNAP, int(w))
+        lw = min(lw, max(SNAP, region_w - self.x_px))
+        if lw == self.w_px:
+            return True
+        new_rect = (self.x_px, self.y_px, lw, self.h_px)
+        if not self.canvas.rect_free(new_rect, ignore=self):
+            return False
+        self._prev = self.grid_rect()
+        self.w_px = lw
+        self.canvas.place(self)
+        self.canvas.sync_size()
+        self.geometryCommitted.emit()
+        return True
+
+    def set_size_px(self, w, h):
+        """Resize the tile to logical *w* × *h* px (origin kept).
+
+        Width is applied first (clamped to the region, reverting on overlap),
+        then height (which keeps the existing accordion-push behaviour). Used by
+        the generic "Tile size" control in the Tile Appearance panel.
+        """
+        self.set_width_px(w)
+        return self.set_height_px(h)
+
     def set_height_px(self, h):
         """Resize the tile to logical height *h* px, keeping its origin/width.
 

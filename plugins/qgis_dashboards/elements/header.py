@@ -30,15 +30,6 @@ try:
 except ImportError:          # QtSvg is optional on some builds
     QSvgRenderer = None
 
-# Mirrors theme.Theme._FONT_FALLBACK so a chosen family degrades gracefully.
-_FONT_FALLBACK = '"Segoe UI", "Helvetica Neue", Arial, sans-serif'
-
-_ALIGN = {
-    "left": Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-    "center": Qt.AlignmentFlag.AlignCenter,
-    "right": Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-}
-
 _DIRECTION = {
     "h": QBoxLayout.Direction.LeftToRight,
     "v": QBoxLayout.Direction.TopToBottom,
@@ -55,6 +46,7 @@ class HeaderElement(DashboardElement):
         # the banner is its own content — drop the base title / description chrome
         self.title_label.hide()
         self.desc_label.hide()
+        self._has_base_title = False   # the banner's own title carries styling
 
         self._logo = QLabel("")
         self._logo.setObjectName("headerLogo")
@@ -75,7 +67,7 @@ class HeaderElement(DashboardElement):
 
     def refresh(self):
         cfg = self.config
-        size = int(cfg.get("logo_size", 40) or 40)
+        size = int(self.style_get("logo_size", 40) or 40)
         pm = self._logo_pixmap((cfg.get("logo_path") or "").strip(), size)
         if pm is not None:
             self._logo.setPixmap(pm)
@@ -84,7 +76,7 @@ class HeaderElement(DashboardElement):
             self._logo.clear()
             self._logo.hide()
         self._title.setText(cfg.get("title", "") or "")
-        self._rebuild_inner(cfg.get("logo_slot", "left"))
+        self._rebuild_inner(self.style_get("logo_slot", "left"))
         self._restyle()
 
     def _rebuild_inner(self, slot):
@@ -101,15 +93,12 @@ class HeaderElement(DashboardElement):
             lay.addWidget(self._logo, 0)
 
     def _restyle(self):
+        # the banner title is a full text role (font / size / color / weight /
+        # italic / alignment), all from the Tile Appearance panel.
         th = self.effective_theme()
-        family = self.config.get("font_family") or th.font_family
-        size = int(self.config.get("font_size", 22) or 22)
-        align = self.config.get("align", "left")
-        self._title.setAlignment(_ALIGN.get(align, _ALIGN["left"]))
-        self._title.setStyleSheet(
-            'color:{c}; font-family:"{f}", {fb}; font-size:{s}px;'
-            "font-weight:700; background:transparent;".format(
-                c=th.text, f=family, fb=_FONT_FALLBACK, s=size))
+        self.apply_text_role(self._title, "title", color=th.text,
+                             font=th.font_family, size=22, weight=700,
+                             align="left")
 
     # ---- logo loading (raster + SVG; static is enough for a brand mark) ----
 

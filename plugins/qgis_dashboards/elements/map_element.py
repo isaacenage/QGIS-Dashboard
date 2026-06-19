@@ -30,6 +30,7 @@ flag (default on) lets the user pause the extent push without unwiring.
 from html import escape
 
 from qgis.PyQt.QtCore import QTimer, Qt
+from qgis.PyQt.QtGui import QColor
 from qgis.PyQt.QtWidgets import QFrame, QVBoxLayout, QLabel
 from qgis.gui import QgsMapCanvas, QgsMapToolPan, QgsRubberBand
 from qgis.core import QgsFeatureRequest, QgsRectangle, NULL
@@ -212,7 +213,11 @@ class MapElement(DashboardElement):
         self._push_extent_filter()
 
     def _restyle(self):
-        self.canvas.setCanvasColor(self.canvas.canvasColor())
+        # the map background is a per-tile style role; the identify popup reads
+        # the effective theme directly (so its surface/text/border overrides,
+        # exposed as the "Identify popup" role, apply automatically).
+        th = self.effective_theme()
+        self.canvas.setCanvasColor(QColor(self.style_get("map_bg", th.surface_bg)))
         self.canvas.refresh()
 
     # ---- interaction mode (Use vs Build) ----

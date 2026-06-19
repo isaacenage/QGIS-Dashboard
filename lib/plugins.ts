@@ -25,6 +25,17 @@ export const PLUGINS: Plugin[] = [
     features: ["23 chart types", "Live cross-filter", "12 themes", "HTML export"],
     status: "live",
   },
+  {
+    slug: "titleplotterph",
+    name: "Title Plotter PH",
+    blurb:
+      "Plot Philippine land titles from technical descriptions — no GIS background needed.",
+    pitch:
+      "Turn the bearing-and-distance technical descriptions on Philippine TCTs and OCTs into accurate parcel geometry, right inside QGIS. Snap to a built-in database of official tie points, preview the lot live, check the closing error, and even let AI OCR read the metes-and-bounds straight off a title image.",
+    href: "https://isaacenage.xyz/Tools/titleplotterph",
+    features: ["Tie-point database", "AI OCR", "PRS92 / WGS84", "PDF export"],
+    status: "live",
+  },
 ];
 
 /** The one plugin to spotlight on the hub (first live entry). */

@@ -1,13 +1,15 @@
 # -*- coding: utf-8 -*-
 """The *Publish to public* dialog.
 
-Collects the GitHub token + target repo (persisted in ``QSettings``), runs the
-large-data guard, then publishes the current dashboard via :mod:`publisher`
-behind a modal progress dialog and shows the resulting public URL.
+Collects the author + an optional description (the title comes from the QGIS
+project), runs the large-data guard, then submits the current dashboard to the
+public gallery's intake endpoint via :mod:`publisher`. The endpoint opens a
+**moderated Pull Request** — the dashboard appears in the gallery once the
+maintainer approves it — so the success screen reads "submitted for review",
+not a live URL.
 
-Security note surfaced in the UI: the token is stored locally (on Windows that's
-the user's registry) in plain text, so we recommend a *fine-grained* token
-scoped to only the gallery repo with *Contents: read and write*.
+No GitHub token or repository is needed anymore: contributors just fill in their
+name and click Submit. The author name is remembered locally for convenience.
 """
 
 from qgis.PyQt.QtCore import Qt, QSettings, QUrl
@@ -17,8 +19,7 @@ from qgis.PyQt.QtWidgets import (
     QMessageBox, QProgressDialog, QApplication,
 )
 
-from .github_publish import DEFAULT_REPO, DEFAULT_BRANCH, parse_repo
-from .github_client import PublishError
+from .submit_client import PublishError, GALLERY_URL
 from .publisher import publish_dashboard, oversize_referenced_layers
 
 SCOPE = "qgis_dashboards/publish"
@@ -32,9 +33,6 @@ class PublishDialog(QDialog):
         self.setMinimumWidth(460)
 
         settings = QSettings()
-        token = settings.value(SCOPE + "/token", "", type=str)
-        repo = settings.value(SCOPE + "/repo", DEFAULT_REPO, type=str)
-        branch = settings.value(SCOPE + "/branch", DEFAULT_BRANCH, type=str)
         author = settings.value(SCOPE + "/author", "", type=str)
 
         root = QVBoxLayout(self)
@@ -42,28 +40,15 @@ class PublishDialog(QDialog):
         root.setSpacing(12)
 
         intro = QLabel(
-            "Publish this dashboard to the public gallery. The plugin exports "
-            "the interactive HTML, renders a thumbnail and commits both to your "
-            "gallery repository in one step.")
+            "Share this dashboard in the public gallery. The plugin exports the "
+            "interactive HTML, renders a thumbnail and submits both for review. "
+            "Once approved, it appears at the public gallery for anyone to open.")
         intro.setWordWrap(True)
         root.addWidget(intro)
 
         form = QFormLayout()
         form.setHorizontalSpacing(12)
         form.setVerticalSpacing(8)
-
-        self._token_edit = QLineEdit(token)
-        self._token_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self._token_edit.setPlaceholderText("github_pat_…")
-        form.addRow("GitHub token", self._token_edit)
-
-        self._repo_edit = QLineEdit(repo)
-        self._repo_edit.setPlaceholderText(DEFAULT_REPO)
-        form.addRow("Repository", self._repo_edit)
-
-        self._branch_edit = QLineEdit(branch)
-        self._branch_edit.setPlaceholderText(DEFAULT_BRANCH)
-        form.addRow("Branch", self._branch_edit)
 
         self._author_edit = QLineEdit(author)
         self._author_edit.setPlaceholderText("Your name (shown on the card)")
@@ -75,18 +60,16 @@ class PublishDialog(QDialog):
         root.addLayout(form)
 
         hint = QLabel(
-            "Use a <b>fine-grained</b> token scoped to only this repository with "
-            "<b>Contents: read and write</b>. It's stored locally on this "
-            "computer in plain text — never share your QGIS profile with it.")
-        hint.setTextFormat(Qt.TextFormat.RichText)
+            "Your dashboard is submitted for review before it goes live — no "
+            "account or sign-in needed. The title comes from your QGIS project "
+            "name.")
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#55606d; font-size:11px;")
         root.addWidget(hint)
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Cancel)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
         self._publish_btn = buttons.addButton(
-            "Publish", QDialogButtonBox.ButtonRole.AcceptRole)
+            "Submit", QDialogButtonBox.ButtonRole.AcceptRole)
         buttons.rejected.connect(self.reject)
         self._publish_btn.clicked.connect(self._publish)
         root.addWidget(buttons)
@@ -94,37 +77,17 @@ class PublishDialog(QDialog):
     # ---- actions --------------------------------------------------------
 
     def _publish(self):
-        token = self._token_edit.text().strip()
-        repo = self._repo_edit.text().strip() or DEFAULT_REPO
-        branch = self._branch_edit.text().strip() or DEFAULT_BRANCH
         author = self._author_edit.text().strip()
         description = self._desc_edit.text().strip() or None
-
-        if not token:
-            QMessageBox.warning(
-                self, "Token needed",
-                "Paste a GitHub token to publish. Create a fine-grained token "
-                "scoped to your gallery repository with Contents: read and "
-                "write.")
-            return
-        try:
-            parse_repo(repo)
-        except ValueError as exc:
-            QMessageBox.warning(self, "Check the repository", str(exc))
-            return
 
         skip_layers = self._resolve_large_data()
         if skip_layers is False:        # user cancelled at the guard
             return
 
-        # persist settings (token included — see the in-dialog warning)
-        settings = QSettings()
-        settings.setValue(SCOPE + "/token", token)
-        settings.setValue(SCOPE + "/repo", repo)
-        settings.setValue(SCOPE + "/branch", branch)
-        settings.setValue(SCOPE + "/author", author)
+        # remember the author name for next time
+        QSettings().setValue(SCOPE + "/author", author)
 
-        progress = QProgressDialog("Publishing…", None, 0, 100, self)
+        progress = QProgressDialog("Submitting…", None, 0, 100, self)
         progress.setWindowTitle("Publish to public")
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setMinimumDuration(0)
@@ -139,18 +102,17 @@ class PublishDialog(QDialog):
 
         try:
             result = publish_dashboard(
-                self._window, token, repo, branch, author,
-                description=description, skip_layers=skip_layers,
-                progress=on_progress)
+                self._window, author, description=description,
+                skip_layers=skip_layers, progress=on_progress)
         except PublishError as exc:
             progress.close()
-            QMessageBox.critical(self, "Publish failed", str(exc))
+            QMessageBox.critical(self, "Submission failed", str(exc))
             return
         except Exception as exc:        # never half-report a silent failure
             progress.close()
             QMessageBox.critical(
-                self, "Publish failed",
-                "Something went wrong while publishing:\n{}".format(exc))
+                self, "Submission failed",
+                "Something went wrong while submitting:\n{}".format(exc))
             return
         finally:
             progress.close()
@@ -185,15 +147,15 @@ class PublishDialog(QDialog):
         return set()
 
     def _show_success(self, result):
-        url = result["url"]
-        verb = "updated" if result["is_update"] else "published"
         box = QMessageBox(self)
-        box.setWindowTitle("Published")
+        box.setWindowTitle("Submitted for review")
         box.setIcon(QMessageBox.Icon.Information)
-        box.setText("Your dashboard was {}.\n\nIt will be live within a minute "
-                    "at:\n{}".format(verb, url))
-        open_btn = box.addButton("Open in browser", QMessageBox.ButtonRole.AcceptRole)
+        box.setText(
+            "Thanks! Your dashboard has been submitted for review.\n\n"
+            "Once it's approved it will appear in the public gallery. You can "
+            "check back there anytime.")
+        open_btn = box.addButton("Open gallery", QMessageBox.ButtonRole.AcceptRole)
         box.addButton(QMessageBox.StandardButton.Close)
         box.exec()
         if box.clickedButton() is open_btn:
-            QDesktopServices.openUrl(QUrl(url))
+            QDesktopServices.openUrl(QUrl(GALLERY_URL))

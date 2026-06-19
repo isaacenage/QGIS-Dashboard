@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"C:/Users/enage.isaac/Desktop/Codes/Tools/QGIS Plugins/.claude/hooks/mirror_to_qgis.py\"",
+            "statusMessage": "Mirroring to QGIS plugins…"
+          }
+        ]
+      }
+    ]
+  }
+}

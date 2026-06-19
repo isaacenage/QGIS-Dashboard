@@ -99,7 +99,11 @@ class _ColorButton(QPushButton):
         self.setText(self._color)
 
     def _pick(self):
-        c = QColorDialog.getColor(QColor(self._color), self, "Pick color")
+        # Parent the picker to the top-level window, not this swatch button:
+        # the button carries a ``background:<color>`` stylesheet that would
+        # otherwise cascade into the dialog and tint its whole chrome. The
+        # window's stylesheet gives the picker the normal light look.
+        c = QColorDialog.getColor(QColor(self._color), self.window(), "Pick color")
         if c.isValid():
             self._color = c.name()
             self._refresh()

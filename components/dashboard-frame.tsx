@@ -55,11 +55,19 @@ export function DashboardFrame({ src, title }: { src: string; title: string }) {
           </button>
         </div>
       </div>
+      {/*
+        Published dashboards are now contributed by untrusted authors and served
+        from this site's own origin. WITHHOLD allow-same-origin so their inline
+        JS is sandboxed off our origin (cookies/storage) — combining it with
+        allow-scripts would disable the sandbox entirely. The export is
+        self-contained (no parent/top refs, no localStorage), so it stays fully
+        interactive under allow-scripts alone.
+      */}
       <iframe
         src={src}
         title={title}
         className="h-full w-full flex-1 bg-white"
-        sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+        sandbox="allow-scripts allow-popups"
       />
     </div>
   );

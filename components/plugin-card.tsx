@@ -3,21 +3,32 @@ import { Logo } from "./logo";
 import type { Plugin } from "@/lib/plugins";
 
 // A plugin tile in the hub's "All plugins" grid. Live plugins link to their
-// section; the grid pairs these with a dashed "coming soon" slot.
+// section (or out to the plugin's own page when it has no in-site route); the
+// grid pairs these with a dashed "coming soon" slot.
 export function PluginCard({ plugin }: { plugin: Plugin }) {
-  return (
-    <Link
-      href={plugin.href}
-      className="tile group flex flex-col p-6 transition-transform hover:-translate-y-0.5"
-    >
+  const external = /^https?:\/\//.test(plugin.href);
+  const className =
+    "tile group flex flex-col p-6 transition-transform hover:-translate-y-0.5";
+  const body = (
+    <>
       <Logo size={36} />
       <h3 className="display mt-4 text-lg text-ink">{plugin.name}</h3>
       <p className="mt-2 flex-1 text-sm leading-relaxed text-muted">
         {plugin.blurb}
       </p>
       <span className="mt-4 text-sm font-semibold text-accent-ink group-hover:underline">
-        Explore →
+        {external ? "Visit ↗" : "Explore →"}
       </span>
+    </>
+  );
+
+  return external ? (
+    <a href={plugin.href} target="_blank" rel="noreferrer" className={className}>
+      {body}
+    </a>
+  ) : (
+    <Link href={plugin.href} className={className}>
+      {body}
     </Link>
   );
 }

@@ -259,6 +259,17 @@ ICONS = {
         '<rect x="3.5" y="7.5" width="17" height="9" rx="2"/>'
         '<line x1="6" y1="12" x2="11" y2="12"/>'
         '<polyline points="13.6 11 15.8 13.2 18 11"/>'),
+    # filter — a funnel (definition-query builder)
+    "el_filter": _stroke(
+        '<path d="M4 5h16l-6 7v6l-4 2v-8z"/>'),
+    # legend — stacked swatch + label rows (a map legend)
+    "el_legend": _stroke(
+        '<rect x="4" y="6" width="3" height="3" rx="0.6"/>'
+        '<line x1="9.5" y1="7.5" x2="19" y2="7.5"/>'
+        '<rect x="4" y="11" width="3" height="3" rx="0.6"/>'
+        '<line x1="9.5" y1="12.5" x2="19" y2="12.5"/>'
+        '<rect x="4" y="16" width="3" height="3" rx="0.6"/>'
+        '<line x1="9.5" y1="17.5" x2="19" y2="17.5"/>'),
     # text / heading — a serif "T"
     "el_text": _stroke(
         '<path d="M6 6.5V5h12v1.5"/>'

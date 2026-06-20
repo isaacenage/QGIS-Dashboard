@@ -32,6 +32,7 @@ from qgis.core import (
 )
 
 from .style_migrate import migrate_element_style
+from .aggregate_filter import inject_filter
 
 # Appended after a chosen family so a per-tile role font degrades gracefully
 # (mirrors theme.Theme._FONT_FALLBACK).
@@ -266,6 +267,17 @@ class DashboardElement(QFrame):
         req = QgsFeatureRequest()
         expr_str = self._combined_filter()
         if expr_str:
+            # A spatial source (the map) pushes a filter referencing ``@layer``
+            # and ``layer_property(@layer, 'crs')``. Those resolve only when the
+            # request carries an expression context with the layer scope —
+            # without it ``layer_property`` is NULL, ``intersects`` is NULL, and
+            # ``coalesce(..., true)`` lets every feature through, so the chart /
+            # list / pivot never filter by extent (the indicator did, because its
+            # ``evaluate`` builds this same scoped context). Provide it here.
+            ctx = QgsExpressionContext()
+            ctx.appendScopes(
+                QgsExpressionContextUtils.globalProjectLayerScopes(lyr))
+            req.setExpressionContext(ctx)
             req.setFilterExpression(expr_str)
         for f in lyr.getFeatures(req):
             yield f
@@ -273,18 +285,20 @@ class DashboardElement(QFrame):
     def evaluate(self, expression_str):
         """Evaluate an aggregate-style QgsExpression against the layer.
 
-        QGIS aggregate functions ignore the feature-request filter, so the
-        live dashboard filter is exposed as the ``@dashboard_filter`` variable;
-        use the aggregate ``filter:=`` argument to opt in, e.g.
-        ``count(1, filter:=@dashboard_filter)``.
+        QGIS aggregate functions ignore the feature-request filter, so the live
+        cross-filter is spliced directly into every aggregate call as its
+        ``filter:=`` argument (e.g. ``sum("pop")`` -> ``sum("pop",
+        filter:=(<filter>))``) so an indicator reacts to its connected sources
+        like the iterate-based elements do. The filter is also exposed as the
+        ``@dashboard_filter`` variable for expressions that reference it.
         """
         lyr = self.layer()
         if lyr is None or not expression_str:
             return None
-        expr = QgsExpression(expression_str)
+        flt = self._combined_filter()
+        expr = QgsExpression(inject_filter(expression_str, flt))
         ctx = QgsExpressionContext()
         ctx.appendScopes(QgsExpressionContextUtils.globalProjectLayerScopes(lyr))
-        flt = self._combined_filter()
         if flt is not None and ctx.lastScope() is not None:
             ctx.lastScope().setVariable("dashboard_filter", flt)
         val = expr.evaluate(ctx)

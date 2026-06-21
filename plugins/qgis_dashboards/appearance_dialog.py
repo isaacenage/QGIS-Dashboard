@@ -36,6 +36,9 @@ from .form_util import compact_form, no_horizontal_scroll, shrink_combo
 # Note: ``chrome_bg`` (the window/tab/rail chrome) is intentionally NOT editable —
 # it stays at the neutral default so dialogs and chrome read consistently. Only the
 # canvas drawing-area background ("Canvas background" → ``window_bg``) is exposed.
+# Note: the "Tile border" color lives on the *Layout* page (next to border
+# thickness + transparency), not here, so border color + thickness stay together
+# and aren't duplicated across the Themes and Layout pages.
 GLOBAL_COLORS = [
     ("window_bg", "Canvas background"),
     ("surface_bg", "Tile background"),
@@ -43,15 +46,17 @@ GLOBAL_COLORS = [
     ("text", "Text (foreground)"),
     ("text_muted", "Secondary text"),
     ("accent", "Accent / highlight"),
-    ("border", "Tile border"),
     ("grid_line", "Grid dots"),
 ]
+# Per-tile overrides DO carry the border color (alongside its thickness +
+# transparency spinners below), so a single tile can restyle its own outline.
 ELEMENT_COLORS = [
     ("surface_bg", "Tile background"),
     ("chart_bg", "Chart background"),
     ("text", "Text (foreground)"),
     ("text_muted", "Secondary text"),
     ("accent", "Accent / highlight"),
+    ("border", "Tile border"),
 ]
 
 
@@ -186,7 +191,8 @@ class AppearanceForm(QWidget):
 
     changed = pyqtSignal()
 
-    def __init__(self, theme, mode="global", on_apply=None, parent=None):
+    def __init__(self, theme, mode="global", on_apply=None, parent=None,
+                 scrollable=True):
         super().__init__(parent)
         self.mode = mode
         self._on_apply = on_apply
@@ -217,15 +223,22 @@ class AppearanceForm(QWidget):
             preset_row.addRow("Preset theme", self._preset)
             root.addLayout(preset_row)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        no_horizontal_scroll(scroll)
+        # When embedded in the Settings panel (scrollable=False) the rows are
+        # added directly so the panel's own outer scroll handles overflow — no
+        # nested scroll areas. Standalone (the per-tile inspector) keeps its own.
         inner = QWidget()
         form = QFormLayout(inner)
         compact_form(form)
-        scroll.setWidget(inner)
-        root.addWidget(scroll, 1)
+        if scrollable:
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+            no_horizontal_scroll(scroll)
+            scroll.setWidget(inner)
+            root.addWidget(scroll, 1)
+        else:
+            root.addWidget(inner, 1)
+        self._rows_form = form   # kept so reload_fonts() can swap the pickers
 
         rows = ELEMENT_COLORS if mode == "element" else GLOBAL_COLORS
         self._color_btns = {}
@@ -280,8 +293,15 @@ class AppearanceForm(QWidget):
             form.addRow("Element title size", self._title_size)
             self._value_size = self._spin(theme.value_size, 10, 96)
             form.addRow("Indicator value size", self._value_size)
+            # transparency + border thickness (global defaults live on Layout;
+            # these let one tile override them — border color is the row above).
+            self._opacity = self._spin(theme.tile_opacity, 0, 100)
+            form.addRow("Tile opacity (%)", self._opacity)
+            self._border_width = self._spin(theme.border_width, 0, 8)
+            form.addRow("Border thickness (px)", self._border_width)
         else:
             self._font_size = self._title_size = self._value_size = None
+            self._opacity = self._border_width = None
 
         # element mode: a quiet "clear" affordance that drops the tile's
         # override entirely (the tile falls back to the global theme).
@@ -290,6 +310,27 @@ class AppearanceForm(QWidget):
             clear.setProperty("variant", "secondary")
             clear.clicked.connect(self._clear_overrides)
             root.addWidget(clear, 0, Qt.AlignmentFlag.AlignLeft)
+
+    def reload_fonts(self):
+        """Rebuild the body + heading font pickers from the live Qt font DB.
+
+        ``QFontComboBox`` snapshots the font database when constructed and does
+        not refresh when a font is added/removed, so after the user installs a
+        custom font we swap each picker for a fresh one — preserving the current
+        selection and signal wiring — instead of reopening Settings."""
+        self._font = self._swap_font_combo(self._font)
+        self._heading_font = self._swap_font_combo(self._heading_font)
+
+    def _swap_font_combo(self, old):
+        """Replace one QFontComboBox in the form with a fresh, current-DB copy."""
+        family = old.currentFont().family()
+        new = QFontComboBox()
+        shrink_combo(new)
+        new.setCurrentFont(QFont(family))   # set before connecting: no _on_edit
+        new.currentFontChanged.connect(self._on_edit)
+        self._rows_form.replaceWidget(old, new)
+        old.deleteLater()
+        return new
 
     def _spin(self, value, lo, hi):
         s = QSpinBox()
@@ -369,6 +410,10 @@ class AppearanceForm(QWidget):
                 self._title_size.setValue(int(theme.title_size))
             if self._value_size is not None:
                 self._value_size.setValue(int(theme.value_size))
+            if self._opacity is not None:
+                self._opacity.setValue(int(theme.tile_opacity))
+            if self._border_width is not None:
+                self._border_width.setValue(int(theme.border_width))
             if self._radius is not None:
                 self._radius.setValue(int(theme.radius))
         finally:
@@ -410,6 +455,10 @@ class AppearanceForm(QWidget):
             ov["title_size"] = self._title_size.value()
         if self._value_size is not None:
             ov["value_size"] = self._value_size.value()
+        if self._opacity is not None:
+            ov["tile_opacity"] = self._opacity.value()
+        if self._border_width is not None:
+            ov["border_width"] = self._border_width.value()
         return {k: v for k, v in ov.items() if k in OVERRIDE_KEYS}
 
 

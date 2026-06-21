@@ -11,8 +11,9 @@ from qgis.core import (
     QgsProject, QgsCoordinateReferenceSystem, QgsCoordinateTransform,
 )
 
+from .. import user_fonts
 from .serialize import build_model
-from .theme_css import theme_to_css_vars
+from .theme_css import theme_to_css_vars, referenced_families, font_face_css
 from .html_builder import build_html, load_assets
 from .data_collect import (
     collect_layer_data, base_pass_indices, image_data_uri, layer_size_info,
@@ -162,6 +163,23 @@ def _build_tile(tile, fid_indexes, skip_layers, window, layers_model):
     return out
 
 
+def _build_font_faces(window, theme):
+    """``@font-face`` block embedding the custom fonts the dashboard references.
+
+    Mirrors the ``.qdash`` embed: collect families used by the theme and every
+    tile override, keep only the installed user fonts, and inline their bytes so
+    the exported HTML renders with the font on any machine. Empty when none."""
+    styles = []
+    for page in window.pages():
+        for tile in page.canvas.tiles():
+            style = tile.element.config.get("style")
+            if isinstance(style, dict):
+                styles.append(style)
+    names = referenced_families(theme, styles)
+    custom = names & set(user_fonts.custom_families())
+    return font_face_css(user_fonts.embedded_payload(sorted(custom)))
+
+
 def build_dashboard_html(window, skip_layers=None):
     """Assemble the dashboard into a single self-contained HTML string.
 
@@ -191,10 +209,11 @@ def build_dashboard_html(window, skip_layers=None):
         gap=window.canvas_gap())
 
     css_vars = theme_to_css_vars(model["theme"])
+    font_faces = _build_font_faces(window, model["theme"])
     runtime_css, runtime_js, leaflet_css, leaflet_js = load_assets()
     return build_html(model, css_vars, runtime_css, runtime_js,
                       leaflet_css=leaflet_css, leaflet_js=leaflet_js,
-                      title=_project_title())
+                      title=_project_title(), font_faces=font_faces)
 
 
 def export_dashboard(window, out_path, skip_layers=None):

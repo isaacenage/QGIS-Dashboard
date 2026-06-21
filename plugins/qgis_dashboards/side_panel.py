@@ -27,6 +27,25 @@ from qgis.PyQt.QtWidgets import (
 from .theme import CHROME
 
 PANEL_WIDTH = 360
+PANEL_MIN_WIDTH = 300
+GRIP_WIDTH = 6
+
+
+class _ResizeGrip(QWidget):
+    """A thin left-edge handle that drags the panel wider/narrower."""
+
+    def __init__(self, panel):
+        super().__init__(panel)
+        self._panel = panel
+        self.setObjectName("inspectorGrip")
+        self.setCursor(Qt.CursorShape.SizeHorCursor)
+
+    def mousePressEvent(self, event):
+        event.accept()   # claim the press so the moves below are delivered here
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            self._panel._resize_from_grip(event.globalPos().x())
 
 
 class InspectorPanel(QFrame):
@@ -43,6 +62,7 @@ class InspectorPanel(QFrame):
         self._on_commit = None
         self._on_cancel = None
         self._anim = None
+        self._width = PANEL_WIDTH
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -73,9 +93,9 @@ class InspectorPanel(QFrame):
         root.addWidget(self._content_host, 1)
 
         # ---- footer: Cancel | OK ----
-        footer = QFrame()
-        footer.setObjectName("inspectorFooter")
-        frow = QHBoxLayout(footer)
+        self._footer = QFrame()
+        self._footer.setObjectName("inspectorFooter")
+        frow = QHBoxLayout(self._footer)
         frow.setContentsMargins(16, 10, 16, 12)
         frow.addStretch(1)
         self._cancel_btn = QPushButton("Cancel")
@@ -85,7 +105,10 @@ class InspectorPanel(QFrame):
         self._ok_btn = QPushButton("OK")
         self._ok_btn.clicked.connect(self._commit)
         frow.addWidget(self._ok_btn)
-        root.addWidget(footer)
+        root.addWidget(self._footer)
+
+        # left-edge drag handle to resize the panel width (raised over content)
+        self._grip = _ResizeGrip(self)
 
         self.apply_theme(theme)
         self.hide()
@@ -93,14 +116,23 @@ class InspectorPanel(QFrame):
     # ---- opening / closing ---------------------------------------------
 
     def open_editor(self, title, content, on_commit=None, on_cancel=None,
-                    subject=None, commit_label="OK"):
+                    subject=None, commit_label="OK", footer=True, width=None):
         """Show *content* in the panel, replacing any open editor (committing
-        it first)."""
+        it first).
+
+        *footer* shows/hides the Cancel|OK row (Settings applies live, so it
+        opens with the footer hidden — only the ✕ closes it). *width* sets the
+        panel's pixel width on open (e.g. a wider Settings panel); when omitted
+        the last width is kept.
+        """
         # implicit-commit the editor that's already open
         self._finish(commit=True)
 
         self._title.setText(title)
         self._ok_btn.setText(commit_label)
+        self._footer.setVisible(footer)
+        if width is not None:
+            self._width = max(PANEL_MIN_WIDTH, int(width))
         self._content = content
         self._subject = subject
         self._on_commit = on_commit
@@ -153,19 +185,38 @@ class InspectorPanel(QFrame):
 
     # ---- geometry / animation ------------------------------------------
 
+    def _clamped_width(self):
+        p = self.parentWidget()
+        if p is None:
+            return self._width
+        return max(PANEL_MIN_WIDTH, min(self._width, int(p.width() * 0.95)))
+
     def reposition(self):
         """Pin to the right edge of the parent (over the canvas), full height."""
         p = self.parentWidget()
         if p is None:
             return
-        self.setGeometry(QRect(p.width() - PANEL_WIDTH, 0,
-                               PANEL_WIDTH, p.height()))
+        w = self._clamped_width()
+        self.setGeometry(QRect(p.width() - w, 0, w, p.height()))
+        # keep the resize handle pinned to the panel's left edge, on top
+        self._grip.setGeometry(0, 0, GRIP_WIDTH, self.height())
+        self._grip.raise_()
+
+    def _resize_from_grip(self, global_x):
+        """Drag the left edge: widen as the handle moves left, clamp, re-pin."""
+        p = self.parentWidget()
+        if p is None:
+            return
+        local_x = p.mapFromGlobal(QPoint(int(global_x), 0)).x()
+        self._width = p.width() - local_x   # clamped in reposition()
+        self.reposition()
 
     def _animate_in(self):
         p = self.parentWidget()
         if p is None:
             return
-        end = QPoint(p.width() - PANEL_WIDTH, 0)
+        w = self._clamped_width()
+        end = QPoint(p.width() - w, 0)
         start = QPoint(p.width(), 0)
         anim = QPropertyAnimation(self, b"pos", self)
         anim.setDuration(180)
@@ -192,6 +243,8 @@ QToolButton#inspectorClose {{
     color:{muted}; font-size:15px;
 }}
 QToolButton#inspectorClose:hover {{ background:{brand_soft}; color:{accent}; }}
+#inspectorGrip {{ background:transparent; }}
+#inspectorGrip:hover {{ background:{border}; }}
 """.format(chrome=CHROME["bg"], border=CHROME["border"], text=CHROME["text"],
            muted=CHROME["muted"], accent=CHROME["accent"],
            brand_soft=CHROME["brand_soft"]))

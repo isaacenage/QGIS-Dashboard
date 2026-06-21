@@ -1,41 +1,40 @@
 # -*- coding: utf-8 -*-
-"""Legend widget — a symbology-driven cross-filter source.
+"""Legend widget — a live, interactive legend that mirrors the map.
 
-This tile mirrors the bound layer's *real* map legend: it reads the layer's
-categorized or graduated renderer and lists one checkable row per class, each
-with the class's symbol swatch and label. Unchecking a class drops it from the
-filter the tile pushes onto the bus, so toggling legend classes filters every
-connected tile (and, wired to the map, visibly subsets the rendered features).
+This tile shows **exactly what the map shows**: every vector layer on the QGIS
+map canvas, in draw order, each with its current symbology (one row per legend
+class, with the real symbol swatch). It is an *interactive* legend — ticking a
+class off **hides that classification on the map** (and back on to show it),
+exactly like the checkboxes in the QGIS Layers panel.
 
-It is a *pure* source (``accepts_filter = False``). The class-set → expression
-translation lives in the Qt-free :mod:`legend_model` (unit-tested); this element
-only does the QGIS-side renderer reading and the widget plumbing.
-
-Limitation (v1): filtering assumes the renderer classifies on a *field*. A
-renderer keyed by an expression still lists its classes but the pushed filter
-double-quotes the classification string as a field reference.
+Implementation notes:
+  * Layers + symbology come from ``iface.mapCanvas().layers()`` and each
+    renderer's ``legendSymbolItems()`` — the same generic API QGIS's own legend
+    uses, so it works for categorized / graduated / rule-based / single-symbol
+    renderers (single-symbol layers show one non-toggle row).
+  * Toggling calls ``renderer.checkLegendSymbolItem(ruleKey, on)`` then
+    ``layer.triggerRepaint()``; the dashboard map (which mirrors these layers)
+    and the QGIS canvas both update. The shared layer's *data* is never touched
+    — only the symbology class visibility, which is what a legend toggles.
+  * It is not a cross-filter bus participant (``is_filter_source`` /
+    ``accepts_filter`` are both False): it controls map rendering directly, so it
+    needs no Connections wiring.
 """
 
 from qgis.PyQt.QtCore import Qt, QSize
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QListWidget, QListWidgetItem, QAbstractItemView
-from qgis.core import (
-    NULL,
-    QgsCategorizedSymbolRenderer,
-    QgsGraduatedSymbolRenderer,
-    QgsSymbolLayerUtils,
-)
+from qgis.core import QgsProject, QgsVectorLayer, QgsSymbolLayerUtils
 
 from .base import DashboardElement
-from . import legend_model
 
-_SWATCH = QSize(16, 16)
-_ROLE = Qt.ItemDataRole.UserRole
+_SWATCH = QSize(18, 18)
+_ROLE = Qt.ItemDataRole.UserRole   # stores (layer_id, ruleKey) on toggle rows
 
 
 class LegendElement(DashboardElement):
     type_name = "legend"
-    is_filter_source = True
+    is_filter_source = False
     accepts_filter = False
 
     def __init__(self, bus, config=None, parent=None):
@@ -43,20 +42,34 @@ class LegendElement(DashboardElement):
         self.list = QListWidget()
         self.list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.list.setIconSize(_SWATCH)
         self.list.itemChanged.connect(self._on_item_changed)
         self.body.addWidget(self.list)
-        self._mode = None        # "categorized" | "graduated" | None
-        self._field = None
-        self._total = 0
         self._suppress = False
+        # mirror the live map: rebuild when its layer set changes
+        self._canvas = self._map_canvas()
+        if self._canvas is not None:
+            self._canvas.layersChanged.connect(self.refresh)
         self.apply_theme()
         self.refresh()
 
-    # ---- interaction mode ----
+    def _map_canvas(self):
+        iface = getattr(self.bus, "iface", None)
+        return iface.mapCanvas() if iface is not None else None
+
+    def teardown(self):
+        if self._canvas is not None:
+            try:
+                self._canvas.layersChanged.disconnect(self.refresh)
+            except (TypeError, RuntimeError):
+                pass
+            self._canvas = None
+
+    # ---- interaction mode (Use vs Build) ----
 
     def set_interactive(self, on):
         super().set_interactive(on)
-        # Build mode: checkboxes inert so arranging tiles can't push a filter.
+        # Build mode: inert so arranging tiles can't toggle map visibility.
         self.list.setEnabled(bool(on))
 
     # ---- appearance ----
@@ -69,83 +82,105 @@ class LegendElement(DashboardElement):
             'QListWidget::item {{ padding:2px 0; }}'.format(
                 c=th.text, f=th.font_stack(), px=th.font_size))
 
-    # ---- data (QGIS-side renderer reading) ----
+    # ---- mirror the map's layers + symbology ----
 
-    def _classify(self, lyr):
-        """Return (mode, field, items) where items is a list of dicts.
-
-        Each item: ``{"label", "value"|"range", "symbol"}``. ``mode`` is one of
-        ``"categorized"`` / ``"graduated"`` / ``None`` (unsupported renderer).
-        """
-        renderer = lyr.renderer() if lyr is not None else None
-        if isinstance(renderer, QgsCategorizedSymbolRenderer):
-            items = []
-            for cat in renderer.categories():
-                v = cat.value()
-                items.append({"label": cat.label() or str(v),
-                              "value": None if v == NULL else v,
-                              "symbol": cat.symbol()})
-            return "categorized", renderer.classAttribute(), items
-        if isinstance(renderer, QgsGraduatedSymbolRenderer):
-            items = []
-            for rng in renderer.ranges():
-                items.append({"label": rng.label(),
-                              "range": (rng.lowerValue(), rng.upperValue()),
-                              "symbol": rng.symbol()})
-            return "graduated", renderer.classAttribute(), items
-        return None, None, []
+    def _layers(self):
+        """Vector layers shown on the map canvas, in draw order."""
+        canvas = self._canvas or self._map_canvas()
+        if canvas is not None:
+            return [lyr for lyr in canvas.layers()
+                    if isinstance(lyr, QgsVectorLayer)]
+        # fallback when no iface canvas (e.g. tests): every project vector layer
+        return [lyr for lyr in QgsProject.instance().mapLayers().values()
+                if isinstance(lyr, QgsVectorLayer)]
 
     def refresh(self):
-        mode, field, items = self._classify(self.layer())
-        self._mode, self._field, self._total = mode, field, len(items)
         self._suppress = True
         self.list.clear()
-        if mode is None:
-            placeholder = QListWidgetItem("No categories to filter")
+        layers = self._layers()
+        if not layers:
+            placeholder = QListWidgetItem("No layers on the map")
             placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
             self.list.addItem(placeholder)
             self._suppress = False
             self._restyle()
             return
-        for it in items:
-            item = QListWidgetItem(it["label"])
-            item.setFlags(Qt.ItemFlag.ItemIsUserCheckable
-                          | Qt.ItemFlag.ItemIsEnabled)
-            item.setCheckState(Qt.CheckState.Checked)
-            if it.get("symbol") is not None:
-                pix = QgsSymbolLayerUtils.symbolPreviewPixmap(it["symbol"], _SWATCH)
-                item.setIcon(QIcon(pix))
-            item.setData(_ROLE, it["range"] if mode == "graduated" else it["value"])
-            self.list.addItem(item)
+        for layer in layers:
+            renderer = layer.renderer()
+            if renderer is None:
+                continue
+            self._add_layer_header(layer.name())
+            checkable = False
+            try:
+                checkable = renderer.legendSymbolItemsCheckable()
+            except Exception:
+                checkable = False
+            try:
+                items = renderer.legendSymbolItems()
+            except Exception:
+                items = []
+            for leg in items:
+                self._add_symbol_row(layer, renderer, leg, checkable)
         self._suppress = False
         self._restyle()
 
-    # ---- source behavior ----
+    def _add_layer_header(self, name):
+        item = QListWidgetItem(name)
+        item.setFlags(Qt.ItemFlag.NoItemFlags)   # a non-interactive group label
+        font = item.font()
+        font.setBold(True)
+        item.setFont(font)
+        self.list.addItem(item)
 
-    def _checked_data(self):
-        out = []
-        for i in range(self.list.count()):
-            item = self.list.item(i)
-            if item.checkState() == Qt.CheckState.Checked:
-                out.append(item.data(_ROLE))
-        return out
-
-    def _on_item_changed(self, _item):
-        if self._suppress or not self._interactive or self._mode is None:
-            return
-        checked = self._checked_data()
-        if self._mode == "graduated":
-            expr = legend_model.ranges_to_expression(
-                self._field, checked, self._total)
+    def _add_symbol_row(self, layer, renderer, leg, checkable):
+        item = QListWidgetItem("    " + (leg.label() or ""))
+        symbol = leg.symbol()
+        if symbol is not None:                    # legend symbols can be null
+            try:
+                pix = QgsSymbolLayerUtils.symbolPreviewPixmap(symbol, _SWATCH)
+                item.setIcon(QIcon(pix))
+            except Exception:
+                pass
+        key = leg.ruleKey()
+        if checkable and key:
+            item.setFlags(Qt.ItemFlag.ItemIsUserCheckable
+                          | Qt.ItemFlag.ItemIsEnabled)
+            visible = True
+            try:
+                visible = renderer.legendSymbolItemChecked(key)
+            except Exception:
+                visible = True
+            item.setCheckState(Qt.CheckState.Checked if visible
+                               else Qt.CheckState.Unchecked)
+            item.setData(_ROLE, (layer.id(), key))
         else:
-            expr = legend_model.categories_to_expression(
-                self._field, checked, self._total)
-        self.bus.set_filter(self.id, expr)
+            # single-symbol / non-checkable class: show it, but it can't toggle
+            item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            item.setData(_ROLE, None)
+        self.list.addItem(item)
 
-    def _on_filters_cleared(self):
-        self._suppress = True
-        for i in range(self.list.count()):
-            item = self.list.item(i)
-            if item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
-                item.setCheckState(Qt.CheckState.Checked)
-        self._suppress = False
+    # ---- interactivity: toggle a class on the map ----
+
+    def _on_item_changed(self, item):
+        if self._suppress or not self._interactive:
+            return
+        data = item.data(_ROLE)
+        if not data:
+            return
+        layer_id, key = data
+        layer = QgsProject.instance().mapLayer(layer_id)
+        if layer is None:
+            return
+        renderer = layer.renderer()
+        if renderer is None:
+            return
+        try:
+            if not renderer.legendSymbolItemsCheckable():
+                return
+            checked = item.checkState() == Qt.CheckState.Checked
+            renderer.checkLegendSymbolItem(key, checked)
+        except Exception:
+            return
+        # repaint every canvas showing this layer — the dashboard map mirror and
+        # the main QGIS canvas both reflect the class being hidden/shown.
+        layer.triggerRepaint()

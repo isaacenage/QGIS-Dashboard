@@ -50,7 +50,9 @@ class CleanConfigStyleHoistTest(unittest.TestCase):
     def test_explicit_top_level_wins(self):
         cfg = clean_config({"max_rows": 99, "style": {"rows_shown": 25}})
         self.assertEqual(cfg["max_rows"], 99)
-from export.theme_css import theme_to_css_vars
+from export.theme_css import (
+    theme_to_css_vars, referenced_families, font_face_css,
+)
 from export.html_builder import build_html, embed_json
 from export.basemap import xyz_template_to_leaflet, OSM_BASEMAP
 from export.size_estimate import estimate_layer_bytes
@@ -302,6 +304,48 @@ class SizeEstimateTest(unittest.TestCase):
     def test_field_count_floored_at_one(self):
         # 0 fields must not zero out the attribute estimate
         self.assertGreater(estimate_layer_bytes(10, 0, include_geometry=False), 0)
+
+
+class ReferencedFamiliesTest(unittest.TestCase):
+    def test_collects_theme_and_tile_fonts(self):
+        theme = {"font_family": "Brand Sans", "heading_font": "Brand Serif"}
+        styles = [{"font_family": "Tile One"}, {"heading_font": "Tile Two"}]
+        self.assertEqual(
+            referenced_families(theme, styles),
+            {"Brand Sans", "Brand Serif", "Tile One", "Tile Two"})
+
+    def test_drops_empty_and_dedupes(self):
+        theme = {"font_family": "Shared", "heading_font": ""}
+        styles = [{"font_family": "Shared", "heading_font": None}, {}]
+        self.assertEqual(referenced_families(theme, styles), {"Shared"})
+
+    def test_handles_none_inputs(self):
+        self.assertEqual(referenced_families(None, None), set())
+
+
+class FontFaceCssTest(unittest.TestCase):
+    def test_empty_is_blank(self):
+        self.assertEqual(font_face_css([]), "")
+        self.assertEqual(font_face_css(None), "")
+
+    def test_truetype_entry(self):
+        css = font_face_css([
+            {"family": "Brand Sans", "format": "truetype", "b64": "QUJD"}])
+        self.assertIn("font-family:'Brand Sans'", css)
+        self.assertIn("data:font/ttf;base64,QUJD", css)
+        self.assertIn("format('truetype')", css)
+
+    def test_opentype_mime(self):
+        css = font_face_css([
+            {"family": "X", "format": "opentype", "b64": "QQ=="}])
+        self.assertIn("data:font/otf;base64,QQ==", css)
+        self.assertIn("format('opentype')", css)
+
+    def test_skips_incomplete_entries(self):
+        css = font_face_css([
+            {"family": "", "format": "truetype", "b64": "QQ=="},
+            {"family": "Y", "b64": ""}])
+        self.assertEqual(css, "")
 
 
 if __name__ == "__main__":

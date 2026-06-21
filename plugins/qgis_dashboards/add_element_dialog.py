@@ -28,8 +28,9 @@ from .elements.chart_specs import (
 )
 from .form_util import compact_form, no_horizontal_scroll, shrink_combo
 
-# element types that bind to no vector layer (the Layer row is hidden for them)
-_LAYERLESS_TYPES = ("text", "image", "header")
+# element types that bind to no vector layer (the Layer row is hidden for them).
+# The legend mirrors every layer on the map, so it binds to none of its own.
+_LAYERLESS_TYPES = ("text", "image", "header", "legend")
 
 _IMAGE_FILTER = ("Images (*.png *.jpg *.jpeg *.svg *.gif *.bmp *.webp);;"
                  "All files (*)")
@@ -262,7 +263,7 @@ class ElementConfigForm(QWidget):
         elif t == "filter":
             # multi-field definition query: one dropdown per column at runtime
             self._add_dyn("fields", "Fields (comma sep)", QLineEdit(""))
-        # legend takes no extra rows — its classes come from the layer's renderer
+        # legend takes no rows — it mirrors every layer on the map automatically
         elif t == "list":
             self._add_dyn("display_fields", "Fields (comma sep)", QLineEdit(""))
 

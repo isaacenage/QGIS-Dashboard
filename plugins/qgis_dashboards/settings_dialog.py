@@ -13,21 +13,24 @@
   spacing and text sizes — so the two sections never overlap.
 """
 
-from qgis.PyQt.QtCore import Qt, QSize
+from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtWidgets import (
     QDialog, QLabel, QDialogButtonBox, QVBoxLayout, QHBoxLayout,
-    QFrame, QSlider, QWidget, QListWidget, QListWidgetItem, QStackedWidget,
-    QSpinBox, QFormLayout, QComboBox,
+    QFrame, QSlider, QWidget, QListWidget, QScrollArea,
+    QSpinBox, QFormLayout, QComboBox, QPushButton, QFileDialog, QMessageBox,
 )
 
-from .icons import monochrome_icon, logo_pixmap
-from .appearance_dialog import AppearanceForm
+from .icons import logo_pixmap
+from .appearance_dialog import AppearanceForm, _ColorButton
 from .theme import Theme, SYSTEM_FONT_FAMILY, CHROME
+from . import user_fonts
 
 RADIUS_MIN = 0
 RADIUS_MAX = 32
 GAP_MIN = 0
 GAP_MAX = 48
+BORDER_WIDTH_MIN = 0
+BORDER_WIDTH_MAX = 8
 CANVAS_DIM_MIN = 320
 CANVAS_DIM_MAX = 8000
 
@@ -66,114 +69,84 @@ free and open-source, anyone can use it.</p>
 """
 
 
-class SettingsDialog(QDialog):
-    """The rail's gear hub: a two-column settings panel.
+class SettingsPanel(QWidget):
+    """The gear-button settings hub, hosted in the right inspector panel.
 
-    The *Themes* section embeds the whole-dashboard theme editor inline (no
-    extra dialog hop): *theme* seeds it and *on_appearance* — a callback
-    ``f(Theme)`` — applies each edit live and keeps it. The theme styles the
-    canvas elements only; the plugin chrome keeps a fixed System font.
+    Unlike the compact tile editors this carries a lot of controls, so instead
+    of a cramped master/detail it lays every section out in one **vertically
+    scrollable column** — *Themes* (canvas colors, chart palette, fonts),
+    *Layout* (canvas size, shape, border, transparency, spacing, text sizes) and
+    *About* — so nothing is squeezed; the user scrolls to reach the rest. The
+    host inspector is width-resizable (drag its left edge) and never covers the
+    whole canvas, so theme / font / layout edits preview live behind it.
 
-    The *Layout* section gathers the geometric settings, all applied live:
-    *on_canvas_size* ``f(w, h)`` (the export/print region — the page size),
-    *on_radius* ``f(int)`` (corner radius), *on_gap* ``f(int)`` (element gap /
-    spacing) and *on_size* ``f(key, int)`` where *key* is one of
-    ``font_size`` / ``title_size`` / ``value_size`` (the text sizes). *gap*
-    seeds the spacing slider; *canvas_size* ``(w, h)`` seeds the page-size
-    controls; *theme* seeds the text-size spinners. (Export lives on the page
-    tab strip, not here.)
+    Every control applies live through the callbacks: *on_appearance* ``f(Theme)``;
+    *on_radius* / *on_gap* / *on_opacity* / *on_border_width* ``f(int)``;
+    *on_border_color* ``f(hex)``; *on_size* ``f(key, int)``; *on_canvas_size*
+    ``f(w, h)``. *gap* seeds the spacing slider, *canvas_size* the page-size
+    controls, and *theme* every theme-derived control.
     """
 
     def __init__(self, parent=None, theme=None, on_appearance=None,
                  on_radius=None, on_gap=None, on_size=None,
-                 on_canvas_size=None, gap=0, canvas_size=None):
+                 on_canvas_size=None, on_opacity=None, on_border_width=None,
+                 on_border_color=None, gap=0, canvas_size=None):
         super().__init__(parent)
-        self.setWindowTitle("Settings")
-        self.resize(680, 560)
         self._theme = theme
         self._on_appearance = on_appearance
         self._on_radius = on_radius
         self._on_gap = on_gap
         self._on_size = on_size
         self._on_canvas_size = on_canvas_size
+        self._on_opacity = on_opacity
+        self._on_border_width = on_border_width
+        self._on_border_color = on_border_color
         self._gap = int(gap)
         cw, ch = canvas_size or (CANVAS_PRESETS[0][1], CANVAS_PRESETS[0][2])
         self._canvas_w, self._canvas_h = int(cw), int(ch)
         # guard so programmatic spinner/combo updates don't re-enter the callback
         self._canvas_syncing = False
 
-        # The Settings dialog is CHROME: its colors come from the fixed CHROME
-        # palette, never the dashboard theme (a dark preset must not recolor the
-        # nav or its text). Only the corner-radius value is read from the theme,
-        # because it seeds the (canvas) radius slider on the Layout page.
-        border, muted = CHROME["border"], CHROME["muted"]
-        accent = CHROME["accent"]
-        accent_hover, brand_soft = CHROME["accent_hover"], CHROME["brand_soft"]
-        radius = 12
-        if parent is not None and hasattr(parent, "bus"):
-            radius = int(parent.bus.theme.radius)
-        self._muted = muted
-        self._accent = accent
-        self._accent_hover = accent_hover
-        self._brand_soft = brand_soft
+        # Settings is CHROME: hints read from the fixed CHROME palette so a dark
+        # preset never recolors them. Theme-derived controls (radius, border,
+        # transparency, text sizes) seed from the live theme.
+        self._muted = CHROME["muted"]
+        th = theme if theme is not None else Theme.default()
+        radius = int(th.radius)
+        self._seed_opacity = int(getattr(th, "tile_opacity", 100))
+        self._seed_border_width = int(getattr(th, "border_width", 1))
+        self._seed_border_color = th.border
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        body = QHBoxLayout()
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(0)
-        root.addLayout(body, 1)
+        # one continuous, vertically-scrolling column of sections
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        inner = QWidget()
+        col = QVBoxLayout(inner)
+        col.setContentsMargins(0, 0, 0, 10)
+        col.setSpacing(0)
+        col.addWidget(self._themes_page())
+        col.addWidget(self._divider())
+        col.addWidget(self._layout_page(radius, self._gap, self._muted))
+        col.addWidget(self._divider())
+        col.addWidget(self._about_page())
+        col.addStretch(1)
+        scroll.setWidget(inner)
+        root.addWidget(scroll, 1)
 
-        # ---- left: section nav (master) --------------------------------
-        self._nav = QListWidget()
-        self._nav.setObjectName("settingsNav")
-        self._nav.setFixedWidth(190)
-        self._nav.setIconSize(QSize(18, 18))
-        self._nav.setFrameShape(QFrame.Shape.NoFrame)
-        self._nav.setStyleSheet(
-            "#settingsNav { background:transparent; border:none;"
-            " border-right:1px solid %s; padding:10px 8px; outline:none; }"
-            "#settingsNav::item { padding:9px 12px; border-radius:8px;"
-            " margin:2px 4px; color:%s; }"
-            "#settingsNav::item:hover { background:%s; }"
-            "#settingsNav::item:selected { background:%s; color:%s;"
-            " font-weight:600; }"
-            % (border, muted, brand_soft, brand_soft, accent))
-        body.addWidget(self._nav)
+    # ---- section divider ------------------------------------------------
 
-        # ---- right: stacked detail panes --------------------------------
-        self._stack = QStackedWidget()
-        self._stack.setObjectName("settingsStack")
-        body.addWidget(self._stack, 1)
-
-        self._add_section("Themes", "style_guide", self._themes_page())
-        self._add_section("Layout", "layout",
-                          self._layout_page(radius, self._gap, muted))
-        self._add_section("About", "info", self._about_page())
-
-        self._nav.currentRowChanged.connect(self._stack.setCurrentIndex)
-        self._nav.setCurrentRow(0)
-
-        # ---- footer -----------------------------------------------------
-        footer = QFrame()
-        footer.setStyleSheet("border-top:1px solid %s;" % border)
-        frow = QHBoxLayout(footer)
-        frow.setContentsMargins(22, 10, 22, 12)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        buttons.rejected.connect(self.reject)
-        buttons.accepted.connect(self.accept)
-        frow.addStretch(1)
-        frow.addWidget(buttons)
-        root.addWidget(footer)
-
-    # ---- nav plumbing ---------------------------------------------------
-
-    def _add_section(self, title, icon_name, page):
-        item = QListWidgetItem(monochrome_icon(icon_name, self._muted), title)
-        self._nav.addItem(item)
-        self._stack.addWidget(page)
+    def _divider(self):
+        line = QFrame()
+        line.setFixedHeight(1)
+        line.setStyleSheet("background:%s; border:none;" % CHROME["border"])
+        return line
 
     # ---- pages ----------------------------------------------------------
 
@@ -214,17 +187,93 @@ class SettingsDialog(QDialog):
         # The whole-dashboard theme editor lives inline here (no extra dialog),
         # applying each edit live via on_appearance.
         theme = self._theme if self._theme is not None else Theme.default()
+        # scrollable=False: the panel's own outer scroll handles overflow, so the
+        # theme rows are never trapped in a tiny nested scroll area.
         self._appearance_form = AppearanceForm(
-            theme, mode="global", on_apply=self._on_appearance)
-        lay.addWidget(self._appearance_form, 1)
+            theme, mode="global", on_apply=self._on_appearance, scrollable=False)
+        lay.addWidget(self._appearance_form)
+
+        # Custom fonts: upload your own .ttf/.otf. They install per-profile (so
+        # every project/dashboard on this PC can use them) and are embedded into
+        # shared .qdash files and HTML exports. The pickers above list them once
+        # added (reload_fonts refreshes the QFontComboBoxes in place).
+        self._build_custom_fonts(lay)
         return page
+
+    # ---- custom fonts ---------------------------------------------------
+
+    def _build_custom_fonts(self, lay):
+        self._add_subheading(lay, "Custom fonts")
+        hint = QLabel(
+            "Add your own <b>.ttf</b> / <b>.otf</b> fonts. They stay available "
+            "in every dashboard on this computer, and are embedded into shared "
+            "<b>.qdash</b> files and HTML exports. Pick them in the Body / "
+            "Heading font lists above.")
+        hint.setTextFormat(Qt.TextFormat.RichText)
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color:%s; font-size:11px;" % self._muted)
+        lay.addWidget(hint)
+
+        self._font_list = QListWidget()
+        self._font_list.setFixedHeight(96)
+        lay.addWidget(self._font_list)
+
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        add_btn = QPushButton("Add font…")
+        add_btn.setProperty("variant", "secondary")
+        add_btn.clicked.connect(self._on_add_font)
+        remove_btn = QPushButton("Remove selected")
+        remove_btn.setProperty("variant", "secondary")
+        remove_btn.clicked.connect(self._on_remove_font)
+        row.addWidget(add_btn)
+        row.addWidget(remove_btn)
+        row.addStretch(1)
+        lay.addLayout(row)
+
+        self._refresh_font_list()
+
+    def _refresh_font_list(self):
+        self._font_list.clear()
+        for family in user_fonts.custom_families():
+            self._font_list.addItem(family)
+
+    def _on_add_font(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Add font", "", "Fonts (*.ttf *.otf)")
+        if not path:
+            return
+        added = user_fonts.add_font(path)
+        if not added:
+            QMessageBox.warning(
+                self, "Couldn't add font",
+                "That file couldn't be added. Make sure it is a valid "
+                ".ttf or .otf font file.")
+            return
+        self._refresh_font_list()
+        self._appearance_form.reload_fonts()
+
+    def _on_remove_font(self):
+        item = self._font_list.currentItem()
+        if item is None:
+            return
+        family = item.text()
+        confirm = QMessageBox.question(
+            self, "Remove font",
+            "Remove the custom font \"{}\"? Dashboards still using it will "
+            "fall back to the default font.".format(family))
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        user_fonts.remove_font(family)
+        self._refresh_font_list()
+        self._appearance_form.reload_fonts()
 
     def _layout_page(self, radius, gap, muted):
         page, lay = self._page_shell("Layout")
 
         intro = QLabel(
-            "Page size, shape, spacing and text sizes for the dashboard. Every "
-            "control previews live on the dashboard behind this dialog.")
+            "Page size, shape, border, transparency, spacing and text sizes. "
+            "Every control previews live on the canvas beside this panel.")
         intro.setWordWrap(True)
         intro.setStyleSheet("color:%s;" % muted)
         lay.addWidget(intro)
@@ -250,6 +299,44 @@ class SettingsDialog(QDialog):
         self._radius_slider, self._radius_value = self._slider_row(
             lay, "Corner radius", radius, RADIUS_MIN, RADIUS_MAX,
             page_step=2, muted=muted, on_change=self._on_radius_changed)
+
+        # --- Border (line color + thickness) -------------------------------
+        self._add_subheading(lay, "Border")
+        border_hint = QLabel(
+            "Outline drawn around every dashboard element. Set its color and "
+            "thickness (0 px hides it).")
+        border_hint.setWordWrap(True)
+        border_hint.setStyleSheet("color:%s; font-size:11px;" % muted)
+        lay.addWidget(border_hint)
+
+        color_row = QHBoxLayout()
+        color_row.setSpacing(10)
+        color_row.addWidget(QLabel("Border color"))
+        self._border_color_btn = _ColorButton(self._seed_border_color)
+        self._border_color_btn.changed.connect(self._on_border_color_changed)
+        color_row.addWidget(self._border_color_btn)
+        color_row.addStretch(1)
+        lay.addLayout(color_row)
+
+        self._border_width_slider, self._border_width_value = self._slider_row(
+            lay, "Border thickness", self._seed_border_width,
+            BORDER_WIDTH_MIN, BORDER_WIDTH_MAX, page_step=1, muted=muted,
+            on_change=self._on_border_width_changed)
+
+        # --- Transparency (element opacity) --------------------------------
+        self._add_subheading(lay, "Transparency")
+        opacity_hint = QLabel(
+            "Opacity of every dashboard element — tiles, charts and tables. At "
+            "100% they are solid; lower it to let the canvas show through. The "
+            "canvas background itself is unaffected.")
+        opacity_hint.setWordWrap(True)
+        opacity_hint.setStyleSheet("color:%s; font-size:11px;" % muted)
+        lay.addWidget(opacity_hint)
+
+        self._opacity_slider, self._opacity_value = self._slider_row(
+            lay, "Element opacity", self._seed_opacity, 0, 100,
+            page_step=10, muted=muted, on_change=self._on_opacity_changed,
+            unit="%")
 
         # --- Element gap / spacing (below the corner-radius slider) --------
         self._add_subheading(lay, "Spacing")
@@ -296,8 +383,8 @@ class SettingsDialog(QDialog):
         lay.addWidget(label)
 
     def _slider_row(self, lay, label, value, lo, hi, page_step, muted,
-                    on_change):
-        """Build a labelled slider + live "N px" readout; returns (slider, lbl)."""
+                    on_change, unit="px"):
+        """Build a labelled slider + live "N <unit>" readout; returns (slider, lbl)."""
         row = QHBoxLayout()
         row.setSpacing(10)
         row.addWidget(QLabel(label))
@@ -307,7 +394,7 @@ class SettingsDialog(QDialog):
         slider.setSingleStep(1)
         slider.setPageStep(page_step)
         row.addWidget(slider, 1)
-        readout = QLabel("%d px" % int(value))
+        readout = QLabel("%d %s" % (int(value), unit))
         readout.setMinimumWidth(42)
         readout.setAlignment(Qt.AlignmentFlag.AlignRight
                              | Qt.AlignmentFlag.AlignVCenter)
@@ -385,6 +472,20 @@ class SettingsDialog(QDialog):
         if callable(self._on_gap):
             self._on_gap(value)
 
+    def _on_opacity_changed(self, value):
+        self._opacity_value.setText("%d %%" % value)
+        if callable(self._on_opacity):
+            self._on_opacity(value)
+
+    def _on_border_width_changed(self, value):
+        self._border_width_value.setText("%d px" % value)
+        if callable(self._on_border_width):
+            self._on_border_width(value)
+
+    def _on_border_color_changed(self):
+        if callable(self._on_border_color):
+            self._on_border_color(self._border_color_btn.color())
+
     def _on_size_changed(self, key, value):
         if callable(self._on_size):
             self._on_size(key, value)
@@ -423,3 +524,32 @@ class SettingsDialog(QDialog):
         self._canvas_h = int(self._canvas_h_spin.value())
         if callable(self._on_canvas_size):
             self._on_canvas_size(self._canvas_w, self._canvas_h)
+
+
+class SettingsDialog(QDialog):
+    """Standalone modal wrapper around :class:`SettingsPanel`.
+
+    The live dashboard hosts the settings in the right inspector panel (see
+    ``DashboardWindow.open_settings``); this wrapper is kept for standalone /
+    test use so the same controls can open as a regular dialog.
+    """
+
+    def __init__(self, parent=None, **kwargs):
+        super().__init__(parent)
+        self.setWindowTitle("Settings")
+        self.resize(460, 640)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        self.panel = SettingsPanel(parent=self, **kwargs)
+        root.addWidget(self.panel, 1)
+        footer = QFrame()
+        footer.setStyleSheet("border-top:1px solid %s;" % CHROME["border"])
+        frow = QHBoxLayout(footer)
+        frow.setContentsMargins(22, 10, 22, 12)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        buttons.accepted.connect(self.accept)
+        frow.addStretch(1)
+        frow.addWidget(buttons)
+        root.addWidget(footer)

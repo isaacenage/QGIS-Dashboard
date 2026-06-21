@@ -45,7 +45,8 @@ from .layout_util import default_locked
 from . import project_io
 from .recent_store import RecentStore
 from .start_view import StartView
-from .fonts import ensure_fonts_registered
+from . import user_fonts
+from .export.theme_css import referenced_families
 from .icons import logo_icon, monochrome_icon
 from .sidebar import Sidebar
 from .minimized_bubble import MinimizedBubble
@@ -56,7 +57,7 @@ from .elements import create_element, ELEMENT_LABELS
 from .elements.header_layout import materialize_header_tiles
 from .add_element_dialog import AddElementDialog, ElementConfigForm
 from .element_picker import ElementPicker
-from .settings_dialog import SettingsDialog
+from .settings_dialog import SettingsPanel
 from .tile_style_form import TileStyleForm
 from .connections_dialog import ConnectionsForm
 from .side_panel import InspectorPanel
@@ -100,6 +101,9 @@ def migrate_layout(raw):
         "window": raw.get("window", {}),
         # optional global header (brand banner); absent in v1/v2/older v3 blobs
         "header": raw.get("header") or None,
+        # embedded custom fonts (.qdash / HTML only; never in a .qgz blob);
+        # carried through untouched so opening installs them. Absent elsewhere.
+        "fonts": raw.get("fonts") or None,
     }
 
     if version >= 3 and isinstance(raw.get("pages"), list):
@@ -151,7 +155,7 @@ class DashboardWindow(QMainWindow):
 
     def __init__(self, iface, parent=None):
         super().__init__(parent)
-        ensure_fonts_registered()   # register bundled Inter before any QSS/font use
+        user_fonts.register_all()   # register the user's installed custom fonts
         self.iface = iface
         self.setWindowTitle("QGIS Dashboard")
         self.setWindowIcon(logo_icon())
@@ -583,8 +587,11 @@ class DashboardWindow(QMainWindow):
         if not path:
             return
         try:
-            final = project_io.write_layout_file(
-                path, self._build_layout_dict())
+            data = self._build_layout_dict()
+            fonts = self._collect_embedded_fonts()
+            if fonts:
+                data["fonts"] = fonts
+            final = project_io.write_layout_file(path, data)
         except OSError as exc:
             QMessageBox.critical(
                 self, "Save failed",
@@ -932,41 +939,63 @@ class DashboardWindow(QMainWindow):
         # global controls: the *Themes* editor (canvas colors + fonts) embedded
         # inline, and the *Layout* page (corner radius, element spacing, text
         # sizes) — all applied live via the callbacks below.
-        dlg = SettingsDialog(self, theme=self.bus.theme,
-                             on_appearance=self._apply_global_theme,
-                             on_radius=self._set_global_radius,
-                             on_gap=self._set_global_gap,
-                             on_size=self._set_global_text_size,
-                             on_canvas_size=self._set_canvas_size,
-                             gap=self.canvas_gap(),
-                             canvas_size=self.canvas_size())
-        # Settings applies live (theme, radius, text sizes, gap, canvas size);
-        # pause recording during the dialog so the whole session collapses into
-        # a single undo step captured on close.
+        panel = SettingsPanel(self, theme=self.bus.theme,
+                              on_appearance=self._apply_global_theme,
+                              on_radius=self._set_global_radius,
+                              on_gap=self._set_global_gap,
+                              on_size=self._set_global_text_size,
+                              on_canvas_size=self._set_canvas_size,
+                              on_opacity=self._set_global_opacity,
+                              on_border_width=self._set_global_border_width,
+                              on_border_color=self._set_global_border_color,
+                              gap=self.canvas_gap(),
+                              canvas_size=self.canvas_size())
+        # Settings is hosted in the right inspector panel (not a floating dialog)
+        # so it never covers the canvas and theme/font/layout edits preview live
+        # behind it. It applies live, so the footer is hidden (the ✕ closes it)
+        # and the panel opens a bit wider than a tile editor. Recording is paused
+        # while it's open so the whole session collapses into one undo step.
         was_suspended = self._suspend_history
         self._suspend_history = True
-        try:
-            dlg.exec()
-        finally:
+
+        def finalize():
             self._suspend_history = was_suspended
-        self._schedule_history()
+            self._schedule_history()
+
+        self._inspector.open_editor(
+            "Settings", panel, on_commit=finalize, on_cancel=finalize,
+            footer=False, width=460)
 
     def _apply_global_theme(self, theme):
         """Apply a theme from the *Themes* editor (canvas colors + fonts).
 
         The editor rebuilds its Theme from an open-time snapshot, so the
-        Layout-owned metrics (text sizes + corner radius) it carries may be
-        stale; preserve the *live* ones so editing a color never reverts a
-        size/radius the user just changed on the Layout page.
+        Layout-owned metrics (text sizes, corner radius, border + transparency)
+        it carries may be stale; preserve the *live* ones so editing a color
+        never reverts a size/radius/border the user just changed on Layout.
         """
         live = self.bus.theme
         self.bus.set_theme(theme.with_values(
             font_size=live.font_size, title_size=live.title_size,
-            value_size=live.value_size, radius=live.radius))
+            value_size=live.value_size, radius=live.radius,
+            border=live.border, border_width=live.border_width,
+            tile_opacity=live.tile_opacity))
 
     def _set_global_radius(self, value):
         """Live-apply a new global corner radius to every dashboard element."""
         self.bus.set_theme(self.bus.theme.with_values(radius=int(value)))
+
+    def _set_global_opacity(self, value):
+        """Live-apply element transparency (tiles, charts, tables) globally."""
+        self.bus.set_theme(self.bus.theme.with_values(tile_opacity=int(value)))
+
+    def _set_global_border_width(self, value):
+        """Live-apply the global tile border thickness."""
+        self.bus.set_theme(self.bus.theme.with_values(border_width=int(value)))
+
+    def _set_global_border_color(self, hex_color):
+        """Live-apply the global tile border color."""
+        self.bus.set_theme(self.bus.theme.with_values(border=hex_color))
 
     def _set_global_text_size(self, key, value):
         """Live-apply a text-size change (font_size/title_size/value_size)."""
@@ -1125,6 +1154,25 @@ class DashboardWindow(QMainWindow):
         }
         return data
 
+    def _collect_embedded_fonts(self):
+        """Base64-embed the custom fonts referenced by the current dashboard.
+
+        Used by the ``.qdash`` save (and mirrored by the HTML export): collect
+        the families used by the global theme and every tile override, keep only
+        the ones installed as user fonts, and return their embeddable payloads
+        so a shared dashboard renders — and installs the font — on another PC.
+        Returns ``[]`` when no custom font is in use.
+        """
+        styles = []
+        for page in self._pages:
+            for tile in page.canvas.tiles():
+                style = tile.element.config.get("style")
+                if isinstance(style, dict):
+                    styles.append(style)
+        names = referenced_families(self.bus.theme.to_dict(), styles)
+        custom = names & set(user_fonts.custom_families())
+        return user_fonts.embedded_payload(sorted(custom))
+
     @staticmethod
     def _resolve_canvas_size(data):
         """The export/print region for a layout dict.
@@ -1161,6 +1209,10 @@ class DashboardWindow(QMainWindow):
         dashboard).
         """
         self.clear_all()
+        # Install any fonts the dashboard carries (a shared .qdash) BEFORE the
+        # theme is applied, so referenced custom families resolve. A .qgz blob
+        # has no "fonts" key, so this is a no-op there.
+        user_fonts.install_embedded(data.get("fonts"))
         self.bus.set_theme(Theme.from_dict(data.get("theme")))
         self._apply_window_style()
         grid = data.get("grid", {})

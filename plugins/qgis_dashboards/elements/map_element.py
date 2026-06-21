@@ -159,6 +159,17 @@ class MapElement(DashboardElement):
         # set_interactive once it is placed (honouring the layout lock).
         self._interactive = False
         self.canvas = QgsMapCanvas()
+        # Bring the embedded canvas to parity with the main QGIS canvas, which
+        # enables these from settings on startup. A bare QgsMapCanvas leaves all
+        # three OFF, so every pan/zoom re-renders every feature from scratch,
+        # synchronously on the UI thread — the cause of the stutter (badly
+        # amplified by SVG markers, which get re-rasterized each frame without a
+        # cache). With caching the canvas reuses rendered features, parallel
+        # rendering moves the work off the UI thread, and preview jobs keep the
+        # view responsive during interaction.
+        self.canvas.setCachingEnabled(True)
+        self.canvas.setParallelRenderingEnabled(True)
+        self.canvas.setPreviewJobsEnabled(True)
         self.body.addWidget(self.canvas)
         # Use-mode interaction tool: left-drag pans, left-click identifies. It is
         # installed only while the tile is in Use mode (set_interactive); in Build

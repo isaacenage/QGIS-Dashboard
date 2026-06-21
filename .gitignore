@@ -26,3 +26,8 @@ next-env.d.ts
 
 # Visual brainstorming companion scratch
 .superpowers/
+
+# Local agent/AI tooling — never commit
+.claude/
+docs/superpowers/
+CLAUDE.md

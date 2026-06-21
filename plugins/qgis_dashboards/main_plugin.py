@@ -171,6 +171,52 @@ class qgisdashboard:
             self.window.clear_all()
             self.window.show_start()
 
+    # ---- headless scripting API (QGIS MCP / PyQGIS automation) ----
+    #
+    # These thin wrappers let an automation client build dashboards without the
+    # GUI: ``plugins['qgis_dashboards'].build_dashboard(spec)`` etc. The heavy
+    # lifting lives in ``scripting.py`` (a stable, documented facade). Each
+    # ensures the window exists first, so a single call works from a cold start.
+
+    def build_dashboard(self, spec, show=True, save=True):
+        """Build a whole dashboard from a *spec* dict (see :func:`api_reference`).
+
+        Replaces any current dashboard. Returns ``{pages, elements, warnings}``.
+        """
+        from .scripting import build_dashboard
+        win = self._ensure_window()
+        result = build_dashboard(win, spec, show=show, save=save)
+        if show and self.action is not None:
+            self.action.setChecked(True)
+        return result
+
+    def add_element(self, type_name, config=None, at=None, layer=None,
+                    connect_to=None):
+        """Add a single element to the current page; returns its element id."""
+        from .scripting import add_element
+        win = self._ensure_window()
+        return add_element(win, type_name, config, at=at, layer=layer,
+                           connect_to=connect_to)
+
+    def list_layers(self):
+        """List the project's layers + fields (to pick what tiles bind to)."""
+        from .scripting import list_layers
+        return list_layers()
+
+    def api_reference(self):
+        """Return the scripting API reference text (spec schema, types, themes)."""
+        from .scripting import api_reference
+        return api_reference()
+
+    def dashboard_window(self, show=False):
+        """Return the live :class:`DashboardWindow` (created on first call)."""
+        win = self._ensure_window()
+        if show:
+            win.restore_from_bubble()
+            if self.action is not None:
+                self.action.setChecked(True)
+        return win
+
     def unload(self):
         """Removes the plugin menu item and icon from QGIS GUI.
 

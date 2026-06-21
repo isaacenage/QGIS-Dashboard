@@ -42,6 +42,7 @@ from .history import History
 from .bus import DashboardBus
 from .theme import Theme, CHROME
 from .layout_util import default_locked
+from .auto_layout import compute_auto_layout
 from . import project_io
 from .recent_store import RecentStore
 from .start_view import StartView
@@ -305,6 +306,9 @@ class DashboardWindow(QMainWindow):
             "zoom_out", "Zoom out", self._zoom_out)
         self.sidebar.add_action(
             "zoom_reset", "Reset zoom (100%)", self._zoom_reset)
+        self.sidebar.add_action(
+            "auto_arrange", "Auto-arrange — fit tiles to page",
+            self.auto_arrange)
         self.sidebar.add_stretch()
         self.sidebar.add_action(
             "clear_filter", "Clear filter", self.bus.clear_all_filters)
@@ -416,6 +420,30 @@ class DashboardWindow(QMainWindow):
         view = self.current_view()
         if view is not None:
             view.reset_zoom()
+
+    def auto_arrange(self):
+        """One-click rearrange: fill every page's canvas with no gaps.
+
+        Reflows each page through the pure
+        :func:`auto_layout.compute_auto_layout`, honoring per-element shape
+        biases (indicators equal & adjacent, map biggest, charts shaped by
+        type, lists portrait) while tiling the canvas region edge to edge.
+        The whole multi-page rearrange is one debounced undo step.
+        """
+        for page in self._pages:
+            canvas = page.canvas
+            tiles = canvas.tiles()
+            if not tiles:
+                continue
+            items = [(t.element.type_name,
+                      t.element.config.get("chart_type")) for t in tiles]
+            rects = compute_auto_layout(items, *canvas.content_size())
+            for t, rect in zip(tiles, rects):
+                t.x_px, t.y_px, t.w_px, t.h_px = rect
+                t._prev = rect            # so a later drag reverts to here
+            canvas.reflow()
+            canvas.sync_size()
+            canvas.layoutChanged.emit()   # persists + schedules one undo step
 
     def _reframe_current(self):
         """Fit the current page's export/print region to the viewport."""
@@ -962,9 +990,12 @@ class DashboardWindow(QMainWindow):
             self._suspend_history = was_suspended
             self._schedule_history()
 
+        # Open flush (no body padding) so the section icon rail sits hard
+        # against the panel's right edge; the section pages carry their own
+        # inner padding.
         self._inspector.open_editor(
             "Settings", panel, on_commit=finalize, on_cancel=finalize,
-            footer=False, width=460)
+            footer=False, width=500, content_margins=(0, 0, 0, 0))
 
     def _apply_global_theme(self, theme):
         """Apply a theme from the *Themes* editor (canvas colors + fonts).

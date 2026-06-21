@@ -185,6 +185,11 @@ ICONS = {
         '<line x1="20.5" y1="20.5" x2="16" y2="16"/>'
         '<line x1="8" y1="11" x2="14" y2="11"/>'
         '<line x1="11" y1="8" x2="11" y2="14"/>'),
+    # auto-arrange / fit tiles to page (grid cells inside a frame)
+    "auto_arrange": _stroke(
+        '<rect x="3" y="3" width="18" height="18" rx="2"/>'
+        '<line x1="3" y1="12" x2="21" y2="12"/>'
+        '<line x1="12" y1="3" x2="12" y2="12"/>'),
     # export / share (box with an arrow leaving it) — tinted to one color
     "export": (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '

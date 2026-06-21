@@ -54,7 +54,14 @@ class _ChartPainter(QWidget):
         self.setMinimumHeight(160)
 
     def set_theme(self, theme):
-        self._bg = QColor(theme.chart_bg)
+        # chart background honors the element opacity so a translucent tile shows
+        # the canvas through the chart (the chart widget composites over the tile).
+        bg = QColor(theme.chart_bg)
+        try:
+            bg.setAlphaF(theme.tile_alpha())
+        except AttributeError:      # older theme without opacity support
+            pass
+        self._bg = bg
         self._palette = list(theme.series or DEFAULT_SERIES)
         self._bar = QColor(theme.series_color(0))
         self._bar_sel = QColor(theme.text_muted)

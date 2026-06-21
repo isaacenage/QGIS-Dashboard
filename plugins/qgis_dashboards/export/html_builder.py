@@ -50,12 +50,14 @@ def embed_json(model):
 
 
 def build_html(model, css_vars, runtime_css, runtime_js,
-               leaflet_css="", leaflet_js="", title="Dashboard"):
+               leaflet_css="", leaflet_js="", title="Dashboard", font_faces=""):
     """Return the complete ``index.html`` document as a string.
 
     Leaflet's CSS is inlined before the runtime CSS, and its JS in a dedicated
     ``<script>`` before the runtime ``<script>`` so ``L`` is defined when the
-    runtime executes.
+    runtime executes. *font_faces* (an ``@font-face`` block for embedded custom
+    fonts) is inlined before ``css_vars`` so the families exist when the
+    ``:root`` ``--font-family`` variables reference them.
     """
     data_json = embed_json(model)
     parts = [
@@ -66,6 +68,7 @@ def build_html(model, css_vars, runtime_css, runtime_js,
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
         "<title>{}</title>".format(_escape_html(title)),
         "<style>",
+        font_faces,
         css_vars,
         leaflet_css,
         runtime_css,

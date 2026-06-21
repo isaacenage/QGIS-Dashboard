@@ -63,6 +63,54 @@ def heading_stack(heading, body):
     return '"{}", "{}", {}'.format(head, body, FONT_FALLBACK)
 
 
+def referenced_families(theme, tile_styles=None):
+    """Set of font family names referenced by a theme dict and tile overrides.
+
+    Collects ``font_family`` + ``heading_font`` from the global *theme* dict and
+    from every per-tile ``config["style"]`` dict in *tile_styles*. Empty / None
+    names are dropped. Pure (no QGIS/Qt) so it can be unit-tested and shared by
+    both the HTML export and the ``.qdash`` save path.
+    """
+    out = set()
+    for src in [theme or {}] + list(tile_styles or []):
+        if not isinstance(src, dict):
+            continue
+        for key in ("font_family", "heading_font"):
+            name = src.get(key)
+            if name:
+                out.add(name)
+    return out
+
+
+# Maps a font ``format`` keyword to its data-URI MIME type.
+_FONT_MIME = {"truetype": "font/ttf", "opentype": "font/otf"}
+
+
+def font_face_css(entries):
+    """Return an ``@font-face`` CSS block for embedded custom fonts.
+
+    *entries* is a list of dicts ``{family, format, b64}`` where ``format`` is
+    ``"truetype"`` or ``"opentype"`` and ``b64`` is the base64-encoded font
+    file. The base64 may equivalently be under ``data`` (the shape produced by
+    ``user_fonts.embedded_payload``). Emits one ``@font-face`` per entry with the
+    bytes inlined as a data URI, so an exported dashboard renders with the font
+    on any machine. Returns ``""`` for an empty list. Pure (no I/O)."""
+    rules = []
+    for e in entries or []:
+        family = (e or {}).get("family")
+        b64 = (e or {}).get("b64") or (e or {}).get("data")
+        if not family or not b64:
+            continue
+        fmt = (e or {}).get("format") or "truetype"
+        mime = _FONT_MIME.get(fmt, "font/ttf")
+        rules.append(
+            "@font-face {{ font-family:'{family}'; font-style:normal; "
+            "font-weight:normal; src:url(data:{mime};base64,{b64}) "
+            "format('{fmt}'); }}".format(
+                family=family, mime=mime, b64=b64, fmt=fmt))
+    return "\n".join(rules) + ("\n" if rules else "")
+
+
 def theme_to_css_vars(theme):
     """Return a ``:root { ... }`` CSS block of custom properties for *theme*."""
     def val(key):

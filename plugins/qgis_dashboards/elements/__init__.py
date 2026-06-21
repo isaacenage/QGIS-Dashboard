@@ -7,6 +7,8 @@ from .pivot import PivotElement
 from .list_element import ListElement
 from .map_element import MapElement
 from .category_selector import CategorySelectorElement
+from .filter_element import FilterElement
+from .legend_element import LegendElement
 from .text_element import TextElement
 from .image_element import ImageElement
 from .header import HeaderElement
@@ -19,6 +21,8 @@ ELEMENT_TYPES = {
         ListElement,
         MapElement,
         CategorySelectorElement,
+        FilterElement,
+        LegendElement,
         TextElement,
         ImageElement,
         HeaderElement,
@@ -33,6 +37,8 @@ ELEMENT_LABELS = {
     "list": "List",
     "map": "Map (live canvas)",
     "category_selector": "Category selector",
+    "filter": "Filter",
+    "legend": "Legend",
     "text": "Text / heading",
     "image": "Image",
     "header": "Header (brand banner)",

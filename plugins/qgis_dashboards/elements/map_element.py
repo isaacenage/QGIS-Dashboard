@@ -23,8 +23,12 @@ lock via :meth:`set_interactive`):
   Clearing the filter returns the map to mirroring the QGIS canvas.
 
 Wiring (both as a source and as a fly-to target) is edited from the tile's
-``Connections…`` menu like any other element; an ``extent_filter_enabled`` config
-flag (default on) lets the user pause the extent push without unwiring.
+``Connections…`` menu like any other element. A ``source_filter_mode`` config
+(``off`` / ``extent`` / ``selection`` / ``relay``, default ``extent``; it
+supersedes the legacy ``extent_filter_enabled`` bool) chooses what the map pushes:
+the visible extent, the bound layer's selected features, or a relay of whatever
+filter it receives. As a *visual target* it also renders a filtered clone of its
+bound layer when a connected source (Filter/Legend) filters it.
 """
 
 from html import escape
@@ -33,7 +37,10 @@ from qgis.PyQt.QtCore import QTimer, Qt
 from qgis.PyQt.QtGui import QColor
 from qgis.PyQt.QtWidgets import QFrame, QVBoxLayout, QLabel
 from qgis.gui import QgsMapCanvas, QgsMapToolPan, QgsRubberBand
-from qgis.core import QgsFeatureRequest, QgsRectangle, NULL
+from qgis.core import (
+    QgsFeatureRequest, QgsRectangle, NULL,
+    QgsExpressionContext, QgsExpressionContextUtils,
+)
 from .base import DashboardElement
 from .map_filter import extent_filter_expression
 from .map_identify import search_rect, feature_summary
@@ -131,8 +138,12 @@ class IdentifyPopup(QFrame):
 
 class MapElement(DashboardElement):
     type_name = "map"
-    accepts_filter = False    # never subsets its *displayed* layers
-    is_filter_source = True   # the visible extent drives connected tiles
+    # The map honors an incoming filter for *rendering* only: when a connected
+    # source (Filter/Legend) pushes a subset-compatible expression, the map shows
+    # a filtered **clone** of its bound layer (the shared project layer is never
+    # touched). Its identify / fly-to helpers stay filter-agnostic.
+    accepts_filter = True
+    is_filter_source = True   # the visible extent / selection drives connected tiles
     full_bleed = True   # the canvas fills the tile: no title/description, no padding
     # handles_own_body_drag stays False (inherited): in Build mode the tile's
     # full-tile drag overlay moves the map and routes its right-click menu, just
@@ -140,10 +151,25 @@ class MapElement(DashboardElement):
 
     def __init__(self, bus, config=None, parent=None):
         super().__init__(bus, config, parent)
+        # migrate the legacy bool flag to the source-mode key once, so the
+        # Configure dialog reflects the real mode and future saves use the new key.
+        self.config["source_filter_mode"] = self._source_mode()
+        self.config.pop("extent_filter_enabled", None)
         # map tiles start inert; the hosting tile applies the real mode via
         # set_interactive once it is placed (honouring the layout lock).
         self._interactive = False
         self.canvas = QgsMapCanvas()
+        # Bring the embedded canvas to parity with the main QGIS canvas, which
+        # enables these from settings on startup. A bare QgsMapCanvas leaves all
+        # three OFF, so every pan/zoom re-renders every feature from scratch,
+        # synchronously on the UI thread — the cause of the stutter (badly
+        # amplified by SVG markers, which get re-rasterized each frame without a
+        # cache). With caching the canvas reuses rendered features, parallel
+        # rendering moves the work off the UI thread, and preview jobs keep the
+        # view responsive during interaction.
+        self.canvas.setCachingEnabled(True)
+        self.canvas.setParallelRenderingEnabled(True)
+        self.canvas.setPreviewJobsEnabled(True)
         self.body.addWidget(self.canvas)
         # Use-mode interaction tool: left-drag pans, left-click identifies. It is
         # installed only while the tile is in Use mode (set_interactive); in Build
@@ -154,13 +180,22 @@ class MapElement(DashboardElement):
         # the last combined-source filter we flew to, so the map's own extent
         # pushes (which don't change it) never trigger a re-fly / feedback loop.
         self._last_fly_expr = None
+        # the last expression we pushed as a source — guards against re-emitting
+        # the same filter (esp. in relay mode, where pushing would otherwise
+        # re-fire filtersChanged -> recompute -> push in a loop).
+        self._last_pushed = None
+        # rendering-only filtered clone of the bound layer (visual target).
+        self._filtered_clone = None
+        # the bound layer whose selectionChanged we are subscribed to (selection
+        # source mode), so we can detach cleanly on a mode / layer change.
+        self._sel_layer = None
 
         # debounce: a pan/zoom drag emits many extentsChanged; coalesce them
         # into one filter push so connected tiles re-query once on settle.
         self._filter_timer = QTimer(self)
         self._filter_timer.setSingleShot(True)
         self._filter_timer.setInterval(200)
-        self._filter_timer.timeout.connect(self._push_extent_filter)
+        self._filter_timer.timeout.connect(self._push_source_filter)
 
         self._source = self._qgis_canvas()
         if self._source is not None:
@@ -176,6 +211,9 @@ class MapElement(DashboardElement):
         self.bus.featureAction.connect(self._zoom_to)
         # fly-to target: react to any connected source's filter changing
         self.bus.filtersChanged.connect(self._fly_to_filtered)
+        # relay source mode re-pushes the incoming filter when it changes
+        self.bus.filtersChanged.connect(self._schedule_filter)
+        self._update_selection_hook()
         self.apply_theme()
         self.refresh()
 
@@ -185,8 +223,11 @@ class MapElement(DashboardElement):
 
     def teardown(self):
         self._filter_timer.stop()
+        self._detach_selection_hook()
+        self._drop_clone()
         for sig, slot in ((self.bus.connectionsChanged, self._schedule_filter),
                           (self.bus.filtersChanged, self._fly_to_filtered),
+                          (self.bus.filtersChanged, self._schedule_filter),
                           (self.canvas.extentsChanged, self._schedule_filter),
                           (self.canvas.extentsChanged, self._dismiss_identify)):
             try:
@@ -206,11 +247,14 @@ class MapElement(DashboardElement):
         self._source = None
 
     def reconfigure(self):
-        # full-bleed: no title chrome to update; just re-apply the extent filter
-        # so toggling "filter by extent" takes effect immediately.
+        # full-bleed: no title chrome to update. Re-evaluate the source mode (the
+        # selection hook + a fresh push) and re-render so a mode / layer change
+        # takes effect immediately.
         self.apply_theme()
+        self._update_selection_hook()
+        self._last_pushed = None       # force the new mode to re-push
         self.refresh()
-        self._push_extent_filter()
+        self._push_source_filter()
 
     def _restyle(self):
         # the map background is a per-tile style role; the identify popup reads
@@ -236,39 +280,91 @@ class MapElement(DashboardElement):
             # leaving Use mode: drop the tool (the tile overlay takes the mouse),
             # stop being a source and re-mirror the QGIS canvas
             self.canvas.unsetMapTool(self._tool)
-            self.bus.set_filter(self.id, None)
+            self._set_pushed(None)
             self._last_fly_expr = None
             self._sync_extent(force=True)
 
-    # ---- spatial cross-filter source (filter connected tiles by extent) ----
+    # ---- cross-filter source (extent / selection / relay) ----
 
-    def _extent_enabled(self):
-        return bool(self.config.get("extent_filter_enabled", True))
+    def _source_mode(self):
+        """The map's source strategy, migrating the legacy bool flag.
+
+        ``off`` / ``extent`` / ``selection`` / ``relay``. Older blobs carry
+        ``extent_filter_enabled`` (bool) instead of ``source_filter_mode``:
+        ``False`` -> ``off``, ``True`` / absent -> ``extent``.
+        """
+        mode = self.config.get("source_filter_mode")
+        if mode in ("off", "extent", "selection", "relay"):
+            return mode
+        return "extent" if self.config.get("extent_filter_enabled", True) else "off"
 
     def showEvent(self, event):
-        # Becoming the active page's map: re-apply the current extent so the
-        # filter belongs to this page (pushes are gated on visibility, below).
+        # Becoming the active page's map: re-apply the current source filter so it
+        # belongs to this page (pushes are gated on visibility, below).
         super().showEvent(event)
         self._schedule_filter()
 
     def _schedule_filter(self):
         self._filter_timer.start()
 
-    def _push_extent_filter(self):
+    def _set_pushed(self, expr):
+        """Push *expr* as this map's source filter, skipping no-op repeats."""
+        if expr == self._last_pushed:
+            return
+        self._last_pushed = expr
+        self.bus.set_filter(self.id, expr)
+
+    def _push_source_filter(self):
         # Only the visible (active-page) map in Use mode pushes, so its filter
         # never lands in another page's page-local filter state and a Build-mode
         # map never filters anything.
         if not self._interactive or not self.isVisible():
             return
-        if not self._extent_enabled():
-            self.bus.set_filter(self.id, None)
+        mode = self._source_mode()
+        if mode == "extent":
+            ext = self.canvas.extent()
+            authid = self.canvas.mapSettings().destinationCrs().authid()
+            expr = extent_filter_expression(
+                ext.xMinimum(), ext.yMinimum(), ext.xMaximum(), ext.yMaximum(),
+                authid or None)
+        elif mode == "selection":
+            lyr = self.layer()
+            ids = list(lyr.selectedFeatureIds()) if lyr is not None else []
+            expr = "$id IN ({})".format(", ".join(str(i) for i in ids)) if ids else None
+        elif mode == "relay":
+            # forward whatever our connected sources filter us by, so a
+            # Filter/Legend wired only to the map propagates to the map's targets.
+            expr = self.bus.combined_filter_for(self.id)
+        else:   # "off"
+            expr = None
+        self._set_pushed(expr)
+
+    # ---- selection-source subscription ----
+
+    def _update_selection_hook(self):
+        """Subscribe to the bound layer's selection iff in 'selection' mode."""
+        self._detach_selection_hook()
+        if self._source_mode() != "selection":
             return
-        ext = self.canvas.extent()
-        authid = self.canvas.mapSettings().destinationCrs().authid()
-        expr = extent_filter_expression(
-            ext.xMinimum(), ext.yMinimum(), ext.xMaximum(), ext.yMaximum(),
-            authid or None)
-        self.bus.set_filter(self.id, expr)
+        lyr = self.layer()
+        if lyr is not None:
+            lyr.selectionChanged.connect(self._schedule_filter)
+            self._sel_layer = lyr
+
+    def _detach_selection_hook(self):
+        if self._sel_layer is not None:
+            try:
+                self._sel_layer.selectionChanged.disconnect(self._schedule_filter)
+            except (TypeError, RuntimeError):
+                pass
+            self._sel_layer = None
+
+    # ---- rendering-only visual subset (target) ----
+
+    def _drop_clone(self):
+        if self._filtered_clone is not None:
+            self._filtered_clone.deleteLater()
+            self._filtered_clone = None
 
     # ---- mirror the main QGIS canvas ----
 
@@ -276,9 +372,28 @@ class MapElement(DashboardElement):
         src = self._source
         if src is None:
             return
-        self.canvas.setLayers(src.layers())
+        base_layers = list(src.layers())
+        layers = base_layers
+        new_clone = None
+        # visual target: if a connected source filters us with a subset-compatible
+        # expression, render a filtered clone of the bound layer in its place. The
+        # shared project layer is never modified. A spatial expr (from another map)
+        # that the provider can't compile is detected via setSubsetString -> render
+        # unfiltered.
+        bound = self.layer()
+        incoming = self.bus.combined_filter_for(self.id)
+        if incoming and bound is not None and bound in base_layers:
+            clone = bound.clone()
+            if clone.setSubsetString(incoming):
+                new_clone = clone
+                layers = [new_clone if lyr is bound else lyr for lyr in base_layers]
+        self.canvas.setLayers(layers)
+        old = self._filtered_clone
+        self._filtered_clone = new_clone
         self._sync_crs()
         self._sync_extent()
+        if old is not None and old is not new_clone:
+            old.deleteLater()
 
     def _sync_crs(self):
         if self._source is not None:
@@ -346,6 +461,10 @@ class MapElement(DashboardElement):
         if lyr is None:
             return
         req = QgsFeatureRequest().setFilterExpression(expr)
+        # scope so a spatial source's @layer / layer_property(...) resolves
+        ctx = QgsExpressionContext()
+        ctx.appendScopes(QgsExpressionContextUtils.globalProjectLayerScopes(lyr))
+        req.setExpressionContext(ctx)
         rect = QgsRectangle()
         rect.setMinimal()
         fids = []

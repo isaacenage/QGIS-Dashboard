@@ -67,20 +67,24 @@ _DEFAULTS = {
     "zebra": "#f6f8fb",       # alternating table row
     "selection": "#e5e7eb",   # selected table row / text selection
     "series": list(DEFAULT_SERIES),
-    "font_family": "Inter",   # bundled UI body font (see fonts.py); falls back gracefully
+    "font_family": "Inter",   # default UI body font; resolved against installed QGIS/Qt
+                              # fonts (no longer bundled) and falls back gracefully
     "heading_font": "",       # optional heading/display family (titles + indicator
                               # value). Empty == reuse font_family (no pairing).
     "font_size": 11,
     "title_size": 13,
     "value_size": 30,         # indicator big number
     "radius": 12,             # tile / surface corner radius (px)
+    "border_width": 1,        # tile border thickness (px)
+    "tile_opacity": 100,      # element transparency (%): tiles, charts, tables —
+                              # 100 = solid, 0 = fully see-through (canvas shows)
 }
 
 # Keys a per-element override is allowed to set (a tile can't move the window).
 OVERRIDE_KEYS = (
     "surface_bg", "text", "text_muted", "accent", "chart_bg",
     "series", "font_family", "heading_font", "font_size", "title_size",
-    "value_size",
+    "value_size", "border", "border_width", "tile_opacity",
 )
 
 
@@ -137,8 +141,46 @@ class Theme(object):
         pal = self.series or DEFAULT_SERIES
         return pal[index % len(pal)]
 
+    # ---- transparency (element opacity) ----
+
+    @staticmethod
+    def _to_rgb(hexstr):
+        """Parse ``#rgb`` / ``#rrggbb`` into an (r, g, b) tuple (white on error)."""
+        c = (hexstr or "").lstrip("#")
+        if len(c) == 3:
+            c = "".join(ch * 2 for ch in c)
+        if len(c) == 6:
+            try:
+                return int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+            except ValueError:
+                pass
+        return 255, 255, 255
+
+    def tile_alpha(self):
+        """The element opacity as a 0.0–1.0 fraction (clamped)."""
+        try:
+            return max(0, min(100, int(self.tile_opacity))) / 100.0
+        except (TypeError, ValueError):
+            return 1.0
+
+    def _rgba(self, hexstr):
+        r, g, b = self._to_rgb(hexstr)
+        return "rgba({}, {}, {}, {:.3f})".format(r, g, b, self.tile_alpha())
+
+    def surface_rgba(self):
+        """Tile background with the element opacity applied."""
+        return self._rgba(self.surface_bg)
+
+    def chart_bg_rgba(self):
+        """Chart plot background with the element opacity applied."""
+        return self._rgba(self.chart_bg)
+
+    def zebra_rgba(self):
+        """Alternating table row color with the element opacity applied."""
+        return self._rgba(self.zebra)
+
     # Fallbacks appended after the chosen family so the UI degrades gracefully
-    # when the bundled Inter font is unavailable.
+    # when the chosen font is not installed.
     _FONT_FALLBACK = '"Segoe UI", "Helvetica Neue", Arial, sans-serif'
 
     def font_stack(self):
@@ -236,7 +278,7 @@ QScrollArea {{ background:transparent; border:none; }}
 /* Tiles — the only place the dashboard THEME colors are used. Everything above
    and below is fixed chrome; these canvas_* / tile_* tokens carry the theme. */
 #dashboardElement {{
-    background:{tile_bg}; border:1px solid {tile_border};
+    background:{tile_rgba}; border:{border_width}px solid {tile_border};
     border-radius:{radius}px;
 }}
 /* full-bleed tiles (e.g. the live map, image) fill edge-to-edge but still
@@ -380,6 +422,7 @@ QToolTip {{
             brand_soft=CHROME["brand_soft"], system_font=SYSTEM_FONT_STACK,
             # --- CANVAS: the dashboard theme (tiles + canvas only) ----------
             window_bg=self.window_bg, tile_bg=self.surface_bg,
+            tile_rgba=self.surface_rgba(), border_width=self.border_width,
             tile_border=self.border, radius=self.radius,
             canvas_text=self.text, canvas_muted=self.text_muted,
             canvas_accent=self.accent, value_size=self.value_size,
@@ -417,7 +460,10 @@ QToolTip {{
         category selector's combo). This is what keeps theme colors strictly
         inside the canvas."""
         return """
-#dashboardElement {{ background:{surface_bg}; }}
+#dashboardElement {{
+    background:{surface_rgba}; border:{border_width}px solid {border};
+    border-radius:{radius}px;
+}}
 #elementTitle, #tileTitle {{ color:{text}; {heading_font} font-weight:600; }}
 #tileClose {{ color:{muted}; }}
 #tileClose:hover {{ color:{accent}; }}
@@ -433,16 +479,18 @@ QComboBox QAbstractItemView {{
     selection-background-color:{selection}; selection-color:{text};
 }}
 QTableWidget, QTableView, QTreeWidget, QListWidget {{
-    {base_font} background:{surface_bg}; color:{text}; gridline-color:{border};
+    {base_font} background:{surface_rgba}; color:{text}; gridline-color:{border};
     border:1px solid {border}; selection-background-color:{selection};
-    selection-color:{text}; alternate-background-color:{zebra};
+    selection-color:{text}; alternate-background-color:{zebra_rgba};
 }}
 QHeaderView::section {{
-    {base_font} background:{zebra}; color:{text}; font-weight:600; border:none;
+    {base_font} background:{zebra_rgba}; color:{text}; font-weight:600; border:none;
     border-right:1px solid {border}; border-bottom:1px solid {border};
 }}
 """.format(
-            surface_bg=self.surface_bg, text=self.text, accent=self.accent,
+            surface_bg=self.surface_bg, surface_rgba=self.surface_rgba(),
+            zebra_rgba=self.zebra_rgba(), border_width=self.border_width,
+            radius=self.radius, text=self.text, accent=self.accent,
             muted=self.text_muted, border=self.border,
             selection=self.selection, zebra=self.zebra,
             value_size=self.value_size, heading_stack=self.heading_stack(),

@@ -28,8 +28,9 @@ from .elements.chart_specs import (
 )
 from .form_util import compact_form, no_horizontal_scroll, shrink_combo
 
-# element types that bind to no vector layer (the Layer row is hidden for them)
-_LAYERLESS_TYPES = ("text", "image", "header")
+# element types that bind to no vector layer (the Layer row is hidden for them).
+# The legend mirrors every layer on the map, so it binds to none of its own.
+_LAYERLESS_TYPES = ("text", "image", "header", "legend")
 
 _IMAGE_FILTER = ("Images (*.png *.jpg *.jpeg *.svg *.gif *.bmp *.webp);;"
                  "All files (*)")
@@ -225,10 +226,15 @@ class ElementConfigForm(QWidget):
             # value text size, icon size/position and the value animation are
             # styling — configured from the Tile Appearance panel.
         elif t == "map":
-            extent = QCheckBox()
-            extent.setChecked(True)
-            self._add_dyn("extent_filter_enabled",
-                          "Filter connected tiles to visible extent", extent)
+            mode = QComboBox()
+            for label, key in (("Off (don't filter)", "off"),
+                               ("Visible extent (map frame)", "extent"),
+                               ("Selected features", "selection"),
+                               ("Relay active filter", "relay")):
+                mode.addItem(label, key)
+            i = mode.findData("extent")
+            mode.setCurrentIndex(i if i >= 0 else 0)
+            self._add_dyn("source_filter_mode", "Filter connected tiles by", mode)
         elif t == "chart":
             combo = QComboBox()
             for key in CHART_TYPE_ORDER:
@@ -254,6 +260,10 @@ class ElementConfigForm(QWidget):
             self._add_dyn("show_totals", "Show totals", chk)
         elif t == "category_selector":
             self._add_dyn("category_field", "Category field", self._field_combo())
+        elif t == "filter":
+            # multi-field definition query: one dropdown per column at runtime
+            self._add_dyn("fields", "Fields (comma sep)", QLineEdit(""))
+        # legend takes no rows — it mirrors every layer on the map automatically
         elif t == "list":
             self._add_dyn("display_fields", "Fields (comma sep)", QLineEdit(""))
 
@@ -343,7 +353,7 @@ class ElementConfigForm(QWidget):
             elif isinstance(w, QPlainTextEdit):
                 w.setPlainText(val if isinstance(val, str) else "")
             elif isinstance(w, QLineEdit):
-                if key == "display_fields" and isinstance(val, list):
+                if key in ("display_fields", "fields") and isinstance(val, list):
                     w.setText(", ".join(val))
                 else:
                     w.setText("" if val is None else str(val))
@@ -385,7 +395,7 @@ class ElementConfigForm(QWidget):
                 val = w.text().strip()
                 if val:
                     out[key] = ([s.strip() for s in val.split(",")]
-                                if key == "display_fields" else val)
+                                if key in ("display_fields", "fields") else val)
                 elif not drop_empty:
                     out[key] = ""
         return out

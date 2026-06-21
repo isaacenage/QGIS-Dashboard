@@ -6,6 +6,34 @@ out of :mod:`window` so they can be exercised without a QGIS environment.
 """
 
 
+def region_scale_factor(old_w, old_h, new_w, new_h):
+    """Uniform factor to scale a layout from an old page region to a new one.
+
+    Returns ``min(new_w/old_w, new_h/old_h)`` — the *fit* factor: the layout
+    grows/shrinks to fit fully inside the new page, leaving even margin in the
+    longer axis when the aspect ratio changes. This guarantees every tile stays
+    within the region (``x*f <= old_w*(new_w/old_w) = new_w``), so nothing is
+    ever cropped on PNG/PDF export. A single uniform factor (rather than
+    independent x/y scaling) keeps every tile's own aspect ratio and preserves
+    the no-overlap invariant. Old dimensions are floored at 1 to avoid division
+    by zero; when both axes are unchanged the factor is exactly 1.0.
+    """
+    old_w = max(1, int(old_w))
+    old_h = max(1, int(old_h))
+    return min(new_w / float(old_w), new_h / float(old_h))
+
+
+def scale_rect(rect, factor):
+    """Scale a logical ``(x, y, w, h)`` rect by *factor*, top-left anchored.
+
+    Coordinates are rounded to ints; width/height are floored at 1 so a tile
+    never collapses to zero on an extreme shrink.
+    """
+    x, y, w, h = rect
+    return (int(round(x * factor)), int(round(y * factor)),
+            max(1, int(round(w * factor))), max(1, int(round(h * factor))))
+
+
 def default_locked(blob):
     """Default lock (Use) mode for a migrated layout blob.
 

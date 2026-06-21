@@ -89,7 +89,10 @@ class InspectorPanel(QFrame):
         # ---- content slot ----
         self._content_host = QWidget()
         self._content_layout = QVBoxLayout(self._content_host)
-        self._content_layout.setContentsMargins(16, 14, 16, 14)
+        # Default padding around an editor body; an editor may override it (e.g.
+        # Settings opens flush so its right-edge rail touches the panel edge).
+        self._default_content_margins = (16, 14, 16, 14)
+        self._content_layout.setContentsMargins(*self._default_content_margins)
         root.addWidget(self._content_host, 1)
 
         # ---- footer: Cancel | OK ----
@@ -116,14 +119,18 @@ class InspectorPanel(QFrame):
     # ---- opening / closing ---------------------------------------------
 
     def open_editor(self, title, content, on_commit=None, on_cancel=None,
-                    subject=None, commit_label="OK", footer=True, width=None):
+                    subject=None, commit_label="OK", footer=True, width=None,
+                    content_margins=None):
         """Show *content* in the panel, replacing any open editor (committing
         it first).
 
         *footer* shows/hides the Cancel|OK row (Settings applies live, so it
         opens with the footer hidden — only the ✕ closes it). *width* sets the
         panel's pixel width on open (e.g. a wider Settings panel); when omitted
-        the last width is kept.
+        the last width is kept. *content_margins* (l, t, r, b) overrides the
+        body padding for this editor — e.g. Settings opens flush ``(0,0,0,0)``
+        so its right-edge section rail touches the panel edge; the default
+        padding is restored on close.
         """
         # implicit-commit the editor that's already open
         self._finish(commit=True)
@@ -131,6 +138,9 @@ class InspectorPanel(QFrame):
         self._title.setText(title)
         self._ok_btn.setText(commit_label)
         self._footer.setVisible(footer)
+        self._content_layout.setContentsMargins(
+            *(content_margins if content_margins is not None
+              else self._default_content_margins))
         if width is not None:
             self._width = max(PANEL_MIN_WIDTH, int(width))
         self._content = content
@@ -180,6 +190,8 @@ class InspectorPanel(QFrame):
             self._content_layout.removeWidget(content)
             content.setParent(None)
             content.deleteLater()
+            # restore default body padding for the next editor
+            self._content_layout.setContentsMargins(*self._default_content_margins)
             self.hide()
             self.closed.emit()
 

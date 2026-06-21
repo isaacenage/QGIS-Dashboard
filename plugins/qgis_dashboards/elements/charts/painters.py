@@ -14,7 +14,7 @@ import math
 
 from qgis.PyQt.QtCore import Qt, pyqtSignal, QRectF, QPointF
 from qgis.PyQt.QtGui import QPainter, QColor, QPen, QPolygonF, QPainterPath
-from qgis.PyQt.QtWidgets import QWidget
+from qgis.PyQt.QtWidgets import QWidget, QSizePolicy
 
 from ...theme import DEFAULT_SERIES
 from .. import chart_data
@@ -51,7 +51,16 @@ class _ChartPainter(QWidget):
         self._muted = QColor("#6b7682")
         self._grid = QColor("#e3e8ee")
         self._show_values = True   # draw value labels (Plot appearance role)
-        self.setMinimumHeight(160)
+        # The painter draws into ``self.rect()`` every paintEvent, so it tracks
+        # the tile size automatically — but only if the widget is actually
+        # allowed to take the tile's size. A hard minimum height would pin the
+        # chart once a tile shrank below it (the chart would overflow/clip and
+        # stop following the resize), so allow it to shrink to nothing and let
+        # it expand to fill the body in both directions (mirrors the
+        # ``setMinimumSize(1, 1)`` fill pattern used by image/text tiles).
+        self.setMinimumSize(1, 1)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding,
+                           QSizePolicy.Policy.Expanding)
 
     def set_theme(self, theme):
         # chart background honors the element opacity so a translucent tile shows

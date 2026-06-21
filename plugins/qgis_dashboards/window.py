@@ -1037,11 +1037,13 @@ class DashboardWindow(QMainWindow):
     def _set_canvas_size(self, w, h):
         """Live-apply a new global export/print region to every page.
 
-        Resizes every page's region and reframes the current view so the user
-        immediately sees the new page outline fit to the viewport.
+        Resizes every page's region, **scaling every tile to match** so the
+        whole layout stays responsive (each tile keeps its aspect ratio), then
+        reframes the current view so the user immediately sees the new page
+        outline fit to the viewport.
         """
         for page in self._pages:
-            page.canvas.set_region(int(w), int(h))
+            page.canvas.set_region_scaled(int(w), int(h))
         view = self.current_view()
         if view is not None:
             view.reset_zoom()                  # reframe + re-sync the current one

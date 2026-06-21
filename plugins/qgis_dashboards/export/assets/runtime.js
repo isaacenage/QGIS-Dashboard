@@ -1242,10 +1242,14 @@
     // is inset by GAP on every side inside that footprint (matching the desktop
     // GridTile inset) so adjacent cards always keep their breathing room.
     node.style.position = "absolute";
+    // GAP is the unified spacing S: the page reserves an S/2 margin inside each
+    // edge and every card is inset S/2 inside its footprint, so a card flush to
+    // the content edge sits S from the page edge and two touching footprints
+    // show an S gap between their cards (matching the desktop canvas).
     node.style.left = (Number(g.x || 0) + GAP) + "px";
     node.style.top = (Number(g.y || 0) + GAP) + "px";
-    node.style.width = Math.max(Number(g.w || 120) - 2 * GAP, 1) + "px";
-    node.style.height = Math.max(Number(g.h || 120) - 2 * GAP, 1) + "px";
+    node.style.width = Math.max(Number(g.w || 120) - GAP, 1) + "px";
+    node.style.height = Math.max(Number(g.h || 120) - GAP, 1) + "px";
 
     var showTitle = !FULL_BLEED[tile.type] && tile.type !== "text" && tile.type !== "header";
     if (showTitle) {
@@ -1314,8 +1318,10 @@
       maxR = Math.max(maxR, Number(g.x || 0) + Math.max(Number(g.w || 0), 0));
       maxB = Math.max(maxB, Number(g.y || 0) + Math.max(Number(g.h || 0), 0));
     });
-    grid.style.width = (maxR + 12) + "px";
-    grid.style.height = (maxB + 12) + "px";
+    // grow the surface by one spacing beyond the content so the right/bottom
+    // page margins match the left/top margins and the inter-card gaps
+    grid.style.width = (maxR + GAP) + "px";
+    grid.style.height = (maxB + GAP) + "px";
     page.tiles.forEach(function (tile) { grid.appendChild(renderTile(tile, page)); });
     return grid;
   }

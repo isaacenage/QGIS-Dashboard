@@ -13,17 +13,23 @@
   spacing and text sizes — so the two sections never overlap.
 """
 
-from qgis.PyQt.QtCore import Qt
+from qgis.PyQt.QtCore import Qt, QSize
 from qgis.PyQt.QtWidgets import (
     QDialog, QLabel, QDialogButtonBox, QVBoxLayout, QHBoxLayout,
-    QFrame, QSlider, QWidget, QListWidget, QScrollArea,
+    QFrame, QSlider, QWidget, QListWidget, QScrollArea, QStackedWidget,
+    QToolButton, QButtonGroup,
     QSpinBox, QFormLayout, QComboBox, QPushButton, QFileDialog, QMessageBox,
 )
 
-from .icons import logo_pixmap
+from .icons import logo_pixmap, monochrome_icon
 from .appearance_dialog import AppearanceForm, _ColorButton
 from .theme import Theme, SYSTEM_FONT_FAMILY, CHROME
 from . import user_fonts
+
+# Right-edge section rail (the "tab pages, but icons" nav).
+RAIL_WIDTH = 48
+RAIL_BUTTON_SIZE = 36
+RAIL_ICON_SIZE = 20
 
 RADIUS_MIN = 0
 RADIUS_MAX = 32
@@ -72,11 +78,13 @@ free and open-source, anyone can use it.</p>
 class SettingsPanel(QWidget):
     """The gear-button settings hub, hosted in the right inspector panel.
 
-    Unlike the compact tile editors this carries a lot of controls, so instead
-    of a cramped master/detail it lays every section out in one **vertically
-    scrollable column** — *Themes* (canvas colors, chart palette, fonts),
-    *Layout* (canvas size, shape, border, transparency, spacing, text sizes) and
-    *About* — so nothing is squeezed; the user scrolls to reach the rest. The
+    Each section is its **own page** in a :class:`QStackedWidget`, switched by a
+    slim **icon rail pinned to the panel's right edge** (tab pages, but icons):
+    *Themes* (``appearance`` glyph — canvas colors, chart palette, fonts),
+    *Layout* (``layout`` glyph — canvas size, shape, border, transparency,
+    spacing, text sizes) and *About* (``info`` glyph). Only the active page
+    scrolls, so reaching About no longer means scrolling past the whole theme
+    editor and Layout stack. The active button tints to the CHROME accent. The
     host inspector is width-resizable (drag its left edge) and never covers the
     whole canvas, so theme / font / layout edits preview live behind it.
 
@@ -121,32 +129,96 @@ class SettingsPanel(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # one continuous, vertically-scrolling column of sections
+        # content (left) + section icon rail (right). Each section is its own
+        # page in the stack; only the active one scrolls.
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+
+        self._stack = QStackedWidget()
+        self._stack.addWidget(self._wrap_scroll(self._themes_page()))
+        self._stack.addWidget(self._wrap_scroll(
+            self._layout_page(radius, self._gap, self._muted)))
+        self._stack.addWidget(self._wrap_scroll(self._about_page()))
+        body.addWidget(self._stack, 1)
+        body.addWidget(self._build_rail())
+        root.addLayout(body, 1)
+
+        # open on the first section (also tints its rail glyph to the accent)
+        self._rail_buttons[0][0].setChecked(True)
+        self._stack.setCurrentIndex(0)
+
+    # ---- section nav (right icon rail) ----------------------------------
+
+    def _wrap_scroll(self, page):
+        """Put one section page in its own vertical scroll area."""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        inner = QWidget()
-        col = QVBoxLayout(inner)
-        col.setContentsMargins(0, 0, 0, 10)
-        col.setSpacing(0)
-        col.addWidget(self._themes_page())
-        col.addWidget(self._divider())
-        col.addWidget(self._layout_page(radius, self._gap, self._muted))
-        col.addWidget(self._divider())
-        col.addWidget(self._about_page())
+        scroll.setWidget(page)
+        return scroll
+
+    def _build_rail(self):
+        """A slim right-edge icon rail — one checkable button per section."""
+        rail = QFrame()
+        rail.setObjectName("settingsRail")
+        rail.setFixedWidth(RAIL_WIDTH)
+        rail.setStyleSheet("""
+#settingsRail {{ background:transparent; border-left:1px solid {border}; }}
+QToolButton#settingsRailButton {{
+    border:none; background:transparent; border-radius:8px;
+}}
+QToolButton#settingsRailButton:hover {{ background:{brand_soft}; }}
+QToolButton#settingsRailButton:checked {{ background:{brand_soft}; }}
+""".format(border=CHROME["border"], brand_soft=CHROME["brand_soft"]))
+
+        col = QVBoxLayout(rail)
+        col.setContentsMargins(6, 8, 6, 8)
+        col.setSpacing(8)
+
+        self._rail_group = QButtonGroup(self)
+        self._rail_group.setExclusive(True)
+        self._rail_buttons = []          # list of (QToolButton, icon_key)
+        # (icon key, section label) — order matches the stack pages above.
+        sections = [("appearance", "Themes"),
+                    ("layout", "Layout"),
+                    ("info", "About")]
+        for idx, (icon_key, label) in enumerate(sections):
+            btn = QToolButton(rail)
+            btn.setObjectName("settingsRailButton")
+            btn.setCheckable(True)
+            btn.setToolTip(label)
+            btn.setAccessibleName(label)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setAutoRaise(True)
+            btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+            btn.setFixedSize(RAIL_BUTTON_SIZE, RAIL_BUTTON_SIZE)
+            btn.setIconSize(QSize(RAIL_ICON_SIZE, RAIL_ICON_SIZE))
+            icon = monochrome_icon(icon_key, CHROME["text"])
+            if icon.isNull():
+                btn.setText(label[:2])      # graceful fallback if QtSvg is missing
+            else:
+                btn.setIcon(icon)
+            btn.clicked.connect(
+                lambda _c=False, i=idx: self._stack.setCurrentIndex(i))
+            self._rail_group.addButton(btn, idx)
+            self._rail_buttons.append((btn, icon_key))
+            col.addWidget(btn, 0, Qt.AlignmentFlag.AlignHCenter)
         col.addStretch(1)
-        scroll.setWidget(inner)
-        root.addWidget(scroll, 1)
+        # active section's glyph follows the accent; the rest stay neutral.
+        self._rail_group.buttonToggled.connect(
+            lambda *_a: self._sync_rail_icons())
+        return rail
 
-    # ---- section divider ------------------------------------------------
-
-    def _divider(self):
-        line = QFrame()
-        line.setFixedHeight(1)
-        line.setStyleSheet("background:%s; border:none;" % CHROME["border"])
-        return line
+    def _sync_rail_icons(self):
+        """Tint the checked section's glyph to the accent, the others to text."""
+        for btn, icon_key in self._rail_buttons:
+            tint = CHROME["accent"] if btn.isChecked() else CHROME["text"]
+            icon = monochrome_icon(icon_key, tint)
+            if not icon.isNull():
+                btn.setIcon(icon)
 
     # ---- pages ----------------------------------------------------------
 
@@ -338,19 +410,20 @@ class SettingsPanel(QWidget):
             page_step=10, muted=muted, on_change=self._on_opacity_changed,
             unit="%")
 
-        # --- Element gap / spacing (below the corner-radius slider) --------
+        # --- Spacing: one unified value for gap *and* page margin -----------
         self._add_subheading(lay, "Spacing")
         gap_hint = QLabel(
-            "Breathing room around every dashboard element. At 0 px cards can "
-            "sit edge to edge; slide right to inset each card so a consistent "
-            "gap always shows between elements — no matter how you arrange "
-            "them.")
+            "One value for the whole dashboard: the gap between elements and "
+            "the margin from the page edge to the outer elements are kept equal. "
+            "At 0 px cards sit edge to edge and reach the page edge; raise it "
+            "for an even, consistent inset everywhere — between cards and around "
+            "all four edges — no matter how you arrange them.")
         gap_hint.setWordWrap(True)
         gap_hint.setStyleSheet("color:%s; font-size:11px;" % muted)
         lay.addWidget(gap_hint)
 
         self._gap_slider, self._gap_value = self._slider_row(
-            lay, "Element gap", int(gap), GAP_MIN, GAP_MAX,
+            lay, "Gap & margin", int(gap), GAP_MIN, GAP_MAX,
             page_step=4, muted=muted, on_change=self._on_gap_changed)
 
         # --- Text sizes ----------------------------------------------------

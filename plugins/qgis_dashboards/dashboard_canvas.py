@@ -20,6 +20,7 @@ from qgis.PyQt.QtGui import QPainter, QColor, QPen, QPixmap
 from qgis.PyQt.QtWidgets import QWidget, QFrame, QVBoxLayout, QToolButton, QMenu
 
 from .tile_snap import snap_rect, nearest_free
+from .layout_util import region_scale_factor, scale_rect
 
 HEADER_H = 20        # px drag strip height
 GRIP = 16            # px resize grip square
@@ -429,13 +430,14 @@ class GridTile(QFrame):
         """Resize the tile to logical width *w* px, keeping its origin/height.
 
         A numeric stand-in for dragging the east edge, used by the Tile
-        Appearance "Tile size" control. Clamped to the export region width and
-        **reverted on overlap** (unlike height, which pushes the stack), so a
-        width bump never collides with a neighbour. Returns ``True`` when applied.
+        Appearance "Tile size" control. Clamped to the content width (the page
+        minus its edge margins) and **reverted on overlap** (unlike height,
+        which pushes the stack), so a width bump never collides with a neighbour
+        or spills into the page margin. Returns ``True`` when applied.
         """
-        region_w = self.canvas.region_size()[0]
+        content_w = self.canvas.content_size()[0]
         lw = max(SNAP, int(w))
-        lw = min(lw, max(SNAP, region_w - self.x_px))
+        lw = min(lw, max(SNAP, content_w - self.x_px))
         if lw == self.w_px:
             return True
         new_rect = (self.x_px, self.y_px, lw, self.h_px)
@@ -617,16 +619,47 @@ class DashboardCanvas(QWidget):
         self.sync_size()
         self.update()
 
+    def set_region_scaled(self, w, h):
+        """Resize the page region *and* scale every tile to match.
+
+        Unlike :meth:`set_region` (which only reframes the page, leaving tiles
+        at their absolute pixel geometry — correct for the page-create and
+        layout-load paths), this rescales every tile's logical rect by a single
+        uniform factor so the whole layout grows/shrinks with the page while
+        each tile keeps its own aspect ratio. The factor is the smaller of the
+        two axis ratios (:func:`layout_util.region_scale_factor`) so the layout
+        fits fully inside the new page — every tile stays within the region, so
+        nothing is ever cropped on PNG/PDF export (a different aspect ratio just
+        leaves even margin in the longer axis). The layout is anchored top-left,
+        since tiles live in content-logical coords with the origin at the inner
+        margin. Tiles may shrink below :data:`MIN_TILE` (that floor gates only
+        manual resize, not proportional scaling).
+        """
+        new_w = max(MIN_REGION, int(w))
+        new_h = max(MIN_REGION, int(h))
+        factor = region_scale_factor(self.region_w, self.region_h, new_w, new_h)
+        if abs(factor - 1.0) > 1e-9:
+            for t in self._tiles:
+                t.x_px, t.y_px, t.w_px, t.h_px = scale_rect(t.grid_rect(), factor)
+                t._prev = t.grid_rect()
+        self.set_region(new_w, new_h)   # update region + regrow surface
+        self.reflow()                   # re-place every (now rescaled) tile
+        self.layoutChanged.emit()
+
     # ---- element gap (global spacing) ----
 
     def set_gap(self, px):
-        """Set the global element gap (logical px) and re-apply it live.
+        """Set the global spacing (logical px) and re-apply it live.
 
-        The gap is rendered as a transparent inset around each tile's card plus
-        a matching outer gutter (see :meth:`_pad`), so the spacing is even
-        between cards and at the edges no matter how tiles are dragged.
-        Re-placing every tile picks up the new inset; the surface is re-grown so
-        the wider gutter stays scroll-reachable.
+        ``gap`` is a single *unified spacing* value S: it is the distance
+        between two adjacent cards **and** the page margin from the page edge to
+        the outermost cards — they are deliberately equal so the layout reads as
+        evenly spaced no matter where a tile sits. Mechanically S is split in
+        half twice (see :meth:`_margin` / :meth:`_tile_inset`): each card is
+        inset by S/2 inside its footprint and the page reserves an S/2 margin
+        inside each edge, so a card flush to the content edge ends up S from the
+        page edge and two touching footprints show an S gap between their cards.
+        Re-placing every tile picks up the new inset; the surface is re-grown.
         """
         self.gap = max(0, int(px))
         self.reflow()
@@ -634,21 +667,45 @@ class DashboardCanvas(QWidget):
         self.update()
 
     def _tile_inset(self):
-        """The card inset in display pixels (the gap scaled by the zoom)."""
-        return int(round(self.gap * (self._zoom or 1.0)))
+        """The per-card inset in display px — half the spacing, scaled by zoom.
+
+        Each card is inset by S/2 inside its footprint, so two touching
+        footprints leave a full S between their cards (S/2 from each).
+        """
+        return int(round((self.gap / 2.0) * (self._zoom or 1.0)))
+
+    def _margin(self):
+        """Inner page margin in LOGICAL px — half the spacing (S/2).
+
+        The export/print region (the page) reserves this margin inside every
+        edge. Combined with the per-card inset (also S/2), a card flush to the
+        content edge ends up S from the page edge — equal to the S gap between
+        two adjacent cards. Zero when the spacing is zero, so cards still reach
+        the page edge.
+        """
+        return self.gap // 2
 
     def _pad(self):
-        """Outer gutter (display px) so edge gaps match the inter-card gap.
+        """Display-px offset applied to every tile = the inner page margin.
 
-        Every tile's card is inset by :meth:`_tile_inset` on all four sides, so
-        the gap *between* two adjacent cards is twice the inset, while the gap
-        from a card to a canvas edge (or to a page's docked header banner, which
-        sits flush against the canvas top) would otherwise be only one inset —
-        half as much. Reserving a one-inset gutter around the whole tile area
-        makes every gap equal: between cards, at the four edges, and below the
-        header. Zero when the gap is zero, so cards still reach the edge.
+        Tiles are placed at ``pad + x*zoom`` so logical ``x=0`` lands one margin
+        inside the page's left edge (and likewise the top); the per-card inset
+        then adds the other half, so card-to-edge equals card-to-card. Equal to
+        :meth:`_tile_inset` (both are S/2 scaled by zoom), kept as a separate
+        name because they play conceptually distinct roles (margin vs inset).
         """
-        return self._tile_inset()
+        return int(round(self._margin() * (self._zoom or 1.0)))
+
+    def content_size(self):
+        """Usable tile area inside the page (region minus the two edge margins).
+
+        New tiles, snapping and the no-overlap fit all work in this
+        *content-logical* space (origin at the inner top-left margin), so tiles
+        stay framed by an even margin on every side of the page.
+        """
+        m2 = 2 * self._margin()
+        return (max(MIN_REGION, self.region_w) - m2,
+                max(MIN_REGION, self.region_h) - m2)
 
     # ---- geometry helpers ----
 
@@ -695,12 +752,15 @@ class DashboardCanvas(QWidget):
     def snap_for(self, rect, ignore):
         """Magnetically snap a dragged tile's logical rect to its neighbours.
 
-        Keeps the tile's size and pulls each edge to the nearest neighbour/page
-        snap line (spaced by the global element gap) within :data:`SNAP_PULL`.
+        Keeps the tile's size and pulls each edge to the nearest neighbour /
+        content-edge snap line within :data:`SNAP_PULL`. Footprints snap to
+        **touch** (``gap=0``): the visible spacing is rendered by the per-card
+        inset, so two snapped cards always show exactly the unified spacing —
+        the snap math no longer adds a separate gap that would double it.
         """
         return snap_rect(rect, self._other_rects(ignore),
-                         (self.region_w, self.region_h),
-                         gap=self.gap, threshold=SNAP_PULL)
+                         self.content_size(),
+                         gap=0, threshold=SNAP_PULL)
 
     def fit_for(self, rect, ignore):
         """Nearest same-size placement of *rect* that overlaps nothing.
@@ -710,7 +770,7 @@ class DashboardCanvas(QWidget):
         drag-start position.
         """
         return nearest_free(rect, self._other_rects(ignore),
-                            (self.region_w, self.region_h), step=SNAP)
+                            self.content_size(), step=SNAP)
 
     def set_drop_preview(self, logical_rect, valid):
         """Show the live drag feedback at *logical_rect* (None clears it).
@@ -732,11 +792,13 @@ class DashboardCanvas(QWidget):
     def first_free(self, w, h):
         """Find a non-overlapping origin for a *w*x*h* tile (logical px).
 
-        Searches within the export/print region so new tiles land on the page.
+        Searches within the content area (the page minus its edge margins) so
+        new tiles land on the page framed by an even margin.
         """
         step = 20
-        max_x = max(int(self.region_w - w), 0)
-        max_y = max(int(self.region_h - h), 0)
+        cw, ch = self.content_size()
+        max_x = max(int(cw - w), 0)
+        max_y = max(int(ch - h), 0)
         y = 0
         while y <= max_y:
             x = 0
@@ -758,8 +820,8 @@ class DashboardCanvas(QWidget):
             if tname == "map":
                 pixel_rect = self.first_free(MAP_W, MAP_H)
             elif tname == "header":
-                # a banner-shaped default: spans the region width, short height
-                pixel_rect = self.first_free(self.region_w, HEADER_BAND_H)
+                # a banner-shaped default: spans the content width, short height
+                pixel_rect = self.first_free(self.content_size()[0], HEADER_BAND_H)
             else:
                 pixel_rect = self.first_free(DEFAULT_W, DEFAULT_H)
         tile = GridTile(self, element, pixel_rect)
@@ -820,13 +882,15 @@ class DashboardCanvas(QWidget):
         size now, so Reset Zoom can fit the page exactly.
         """
         z = self._zoom or 1.0
-        pad = self._pad()
+        m2 = 2 * self._margin()   # the page's two edge margins (logical px)
         max_r, max_b = self._content_extent()
-        lw = max(self.region_w, max_r + MARGIN)
-        lh = max(self.region_h, max_b + MARGIN)
-        # +2*pad: the surface carries the outer gutter on top of the tile area
-        w = int(round(lw * z)) + 2 * pad
-        h = int(round(lh * z)) + 2 * pad
+        # the surface spans the page (region) or grows to hold a tile dragged
+        # past the content edge, keeping a matching margin beyond it. ``max_r``
+        # is in content-logical coords, so its page extent is ``max_r + m2``.
+        lw = max(self.region_w, max_r + m2 + MARGIN)
+        lh = max(self.region_h, max_b + m2 + MARGIN)
+        w = int(round(lw * z))
+        h = int(round(lh * z))
         if (self.minimumWidth(), self.minimumHeight()) != (w, h):
             self.setMinimumSize(w, h)
             self.resize(w, h)
@@ -872,7 +936,9 @@ class DashboardCanvas(QWidget):
                 self.set_zoom(1.0)   # reflows + grows the surface to content
             else:
                 self.sync_size()
-            pad = self._pad()   # at zoom 1.0 the region sits at (pad, pad)
+            # the page (region) is drawn from the surface origin (0, 0); its
+            # edge margins are reserved inside it, so the crop is just the
+            # region rect anchored at the top-left.
             scale = max(0.5, float(scale))
             theme = self.bus.theme if self.bus is not None else None
             bg = QColor(theme.window_bg) if theme else QColor("#f4f6f8")
@@ -883,7 +949,7 @@ class DashboardCanvas(QWidget):
             full.setDevicePixelRatio(scale)
             full.fill(bg)
             self.render(full, QPoint(0, 0))
-            src = QRect(int(round(pad * scale)), int(round(pad * scale)),
+            src = QRect(0, 0,
                         max(int(round(self.region_w * scale)), 1),
                         max(int(round(self.region_h * scale)), 1))
             pm = full.copy(src)
@@ -899,10 +965,14 @@ class DashboardCanvas(QWidget):
     # ---- painting ----
 
     def _region_display_rect(self):
-        """The export/print region as a display-pixel ``(x, y, w, h)`` tuple."""
+        """The export/print region as a display-pixel ``(x, y, w, h)`` tuple.
+
+        Anchored at the surface origin; the page's edge margins are reserved
+        inside it (tiles are offset inward by :meth:`_pad`), so the frame is the
+        true page boundary and the off-page scrim falls outside it.
+        """
         z = self._zoom or 1.0
-        pad = self._pad()
-        return (pad, pad,
+        return (0, 0,
                 int(round(self.region_w * z)), int(round(self.region_h * z)))
 
     def _paint_region(self, p, theme):

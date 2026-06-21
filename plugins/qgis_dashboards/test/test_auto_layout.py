@@ -101,6 +101,21 @@ class AutoLayoutTest(unittest.TestCase):
         self.assertEqual(shape_for("chart", "pie")[0], 1.0)  # square
         self.assertGreater(shape_for("chart", "line")[0], 1.0)  # wide
 
+    def test_indicators_wrap_to_two_rows(self):
+        items = [("indicator", None)] * 7
+        W, H = 1400, 360
+        rects = compute_auto_layout(items, W, H)
+        _assert_exact_tiling(self, rects, W, H)
+        ys = sorted({r[1] for r in rects})
+        self.assertEqual(len(ys), 2, "7 indicators should wrap to two rows")
+        # each row's cells are equal width and adjacent
+        for row_y in ys:
+            row = sorted((r for r in rects if r[1] == row_y), key=lambda r: r[0])
+            widths = [r[2] for r in row]
+            self.assertLessEqual(max(widths) - min(widths), 1)
+            for a, b in zip(row, row[1:]):
+                self.assertEqual(b[0], a[0] + a[2])
+
 
 if __name__ == "__main__":
     unittest.main()

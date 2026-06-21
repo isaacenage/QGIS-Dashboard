@@ -91,8 +91,10 @@ def compute_auto_layout(items, width, height):
             gh = avail
         elif kind == "header":
             gh = _clamp(int(round(H * 0.12)), 40, avail - 1)
+            gh = min(gh, max(1, avail - 1))  # never consume all remaining px
         else:  # indicator strip with a main band below it
             gh = _clamp(int(round(H * 0.18)), 60, avail - 1)
+            gh = min(gh, max(1, avail - 1))  # never consume all remaining px
         if kind == "header":
             _lay_equal_row(rects, idxs, y, W, gh)
         elif kind == "indicator":
@@ -157,6 +159,9 @@ def _lay_main(rects, items, idxs, y, W, H):
 
     ry = y
     for g, gh in zip(groups, heights):
+        # linear weight (not sqrt) so the heaviest tile — the map — claims the
+        # most width; this is what makes the map the biggest tile. Differs
+        # deliberately from the sqrt(wt) used in the row-height denominator above.
         wkeys = [a * wt for (_, a, wt) in g]
         widths = _proportional_ints(wkeys, W)  # sum to W exactly
         cx = 0
@@ -192,6 +197,13 @@ def _proportional_ints(weights, total):
 
     Cumulative rounding: the running rounded cumulative always lands on
     ``total`` at the end, so the pieces sum to exactly ``total``.
+
+    Precondition: ``total`` is large relative to the number of weights and
+    weights are not vanishingly small, so every returned piece is >= 1.
+    Both conditions hold for all callers in this module — page dimensions
+    are hundreds of pixels and shape weights are >= 0.6 — so no ``max(1,
+    ...)`` clamp is applied.  Adding such a clamp would break the exact-sum
+    (exact-tiling) guarantee.
     """
     s = sum(weights) or 1.0
     out = []

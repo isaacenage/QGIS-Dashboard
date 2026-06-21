@@ -109,6 +109,39 @@ _PRESETS = [
                    "#2563eb", "#d97706", "#65a30d"],
         "font_family": "Work Sans", "heading_font": "Outfit",
     }),
+    # Lavender glassmorphism, white cards, violet/pink accents, from the
+    # "Omagie" project-management dashboard reference.
+    ("Omagie Glass", {
+        "chrome_bg": "#ffffff", "window_bg": "#ede7f9", "surface_bg": "#ffffff",
+        "text": "#3a2e5c", "text_muted": "#8a7fa6", "accent": "#9b5de5",
+        "border": "#e4dcf4", "chart_bg": "#fbf8fe", "grid_line": "#ddd2f0",
+        "zebra": "#f7f3fd", "selection": "#ece3fb",
+        "series": ["#9b5de5", "#f15bb5", "#c77dff", "#7b6cf0", "#d8a3ff",
+                   "#ff8fc7", "#a98bf2", "#6a5acd"],
+        "font_family": "Poppins", "heading_font": "Poppins",
+    }),
+    # Warm mauve-grey canvas with cream cards and a muted purple accent, from
+    # the "Smartech" student dashboard reference.
+    ("Smartech Mauve", {
+        "chrome_bg": "#ffffff", "window_bg": "#c9b7c5", "surface_bg": "#f3efe9",
+        "text": "#4a3a47", "text_muted": "#8e7e8a", "accent": "#8c6a9e",
+        "border": "#e4dbe0", "chart_bg": "#f3efe9", "grid_line": "#d8cbd3",
+        "zebra": "#efe9f1", "selection": "#e7dcea",
+        "series": ["#8c6a9e", "#d96aa0", "#e8a23d", "#5fa39a", "#b07ac0",
+                   "#e0739a", "#c79a4a", "#7a8fce"],
+        "font_family": "Quicksand", "heading_font": "Quicksand",
+    }),
+    # Soft warm-grey clinical canvas, white cards, chartreuse-yellow accent,
+    # from the "Cardiology" medical-records dashboard reference.
+    ("Cardio Lime", {
+        "chrome_bg": "#ffffff", "window_bg": "#e7e4dd", "surface_bg": "#ffffff",
+        "text": "#1c1c18", "text_muted": "#7a786f", "accent": "#d4e614",
+        "border": "#e0ddd5", "chart_bg": "#f4f2ec", "grid_line": "#d6d3ca",
+        "zebra": "#f1efe9", "selection": "#eef0d4",
+        "series": ["#d4e614", "#b9c70f", "#2b2b2b", "#8a9a3c", "#e3ee5e",
+                   "#6f7d2a", "#a8b30c", "#444444"],
+        "font_family": "Inter", "heading_font": "Inter",
+    }),
     # ---- dark -----------------------------------------------------------
     ("Midnight Slate", {
         "chrome_bg": "#0b1220", "window_bg": "#0f172a", "surface_bg": "#1e293b",
@@ -136,6 +169,50 @@ _PRESETS = [
         "series": ["#818cf8", "#34d399", "#fbbf24", "#f472b6", "#22d3ee",
                    "#a78bfa", "#fb923c", "#4ade80"],
         "font_family": "Plus Jakarta Sans", "heading_font": "Plus Jakarta Sans",
+    }),
+    # Warm gold-on-charcoal, extracted from a dark amber admin-dashboard
+    # reference (brown-charcoal canvas, cream text, signature amber accent).
+    ("Amber Noir", {
+        "chrome_bg": "#1a1613", "window_bg": "#1a1613", "surface_bg": "#272018",
+        "text": "#f2ead9", "text_muted": "#9d927f", "accent": "#e8943a",
+        "border": "#3a3128", "chart_bg": "#221c15", "grid_line": "#3a3128",
+        "zebra": "#221c15", "selection": "#3d3327",
+        "series": ["#e8943a", "#f3c178", "#d9a35c", "#c87f3c", "#ecdcb8",
+                   "#b58a4e", "#a8662c", "#f0b765"],
+        "font_family": "Poppins", "heading_font": "Poppins",
+    }),
+    # Purple-charcoal canvas with pink/violet accents, from the "CRAVEAT"
+    # dark-theme admin dashboard reference.
+    ("Violet Dusk", {
+        "chrome_bg": "#2a2440", "window_bg": "#2a2440", "surface_bg": "#352e52",
+        "text": "#f4f2fa", "text_muted": "#a99fc4", "accent": "#9d6bf5",
+        "border": "#453d68", "chart_bg": "#2e2848", "grid_line": "#453d68",
+        "zebra": "#2e2848", "selection": "#4a3f72",
+        "series": ["#9d6bf5", "#ff7fd1", "#c77dff", "#6c63ff", "#4db6e8",
+                   "#e0a3ff", "#8a5cf0", "#ff9ec7"],
+        "font_family": "Poppins", "heading_font": "Poppins",
+    }),
+    # Deep teal "glass" canvas with spring-green + cyan accents, from the
+    # "DATA CHEF" analytics dashboard reference.
+    ("Mint Glass", {
+        "chrome_bg": "#0c3431", "window_bg": "#0c3431", "surface_bg": "#18514a",
+        "text": "#eafaf4", "text_muted": "#7fb0a3", "accent": "#2fe6a0",
+        "border": "#1f6359", "chart_bg": "#134641", "grid_line": "#1f6359",
+        "zebra": "#134641", "selection": "#256b60",
+        "series": ["#2fe6a0", "#25c2c9", "#7ee06a", "#11b894", "#5ff0c0",
+                   "#1f8f86", "#a8e85c", "#34d3b5"],
+        "font_family": "Montserrat", "heading_font": "Montserrat",
+    }),
+    # Near-black canvas with a single chartreuse-lime accent, from the
+    # "DWISON" overview dashboard reference.
+    ("Lime Noir", {
+        "chrome_bg": "#0b0d0b", "window_bg": "#0b0d0b", "surface_bg": "#14181b",
+        "text": "#f3f5f4", "text_muted": "#8a928f", "accent": "#bef24d",
+        "border": "#262b29", "chart_bg": "#101315", "grid_line": "#262b29",
+        "zebra": "#101315", "selection": "#2c322f",
+        "series": ["#bef24d", "#8fe04c", "#5dd39e", "#3ac77d", "#d4f06a",
+                   "#6fb84a", "#a0e85a", "#2fb56a"],
+        "font_family": "Inter", "heading_font": "Inter",
     }),
 ]
 

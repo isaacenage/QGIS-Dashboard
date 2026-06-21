@@ -990,12 +990,9 @@ class DashboardWindow(QMainWindow):
             self._suspend_history = was_suspended
             self._schedule_history()
 
-        # Open flush (no body padding) so the section icon rail sits hard
-        # against the panel's right edge; the section pages carry their own
-        # inner padding.
         self._inspector.open_editor(
             "Settings", panel, on_commit=finalize, on_cancel=finalize,
-            footer=False, width=500, content_margins=(0, 0, 0, 0))
+            footer=False, width=460)
 
     def _apply_global_theme(self, theme):
         """Apply a theme from the *Themes* editor (canvas colors + fonts).

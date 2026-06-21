@@ -13,7 +13,10 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from submit_payload import gzip_b64, b64, build_payload, payload_bytes
+from submit_payload import (
+    gzip_b64, b64, build_payload, payload_bytes,
+    MAX_PAYLOAD_BYTES, exceeds_size_limit,
+)
 
 
 class TestGzipB64(unittest.TestCase):
@@ -77,6 +80,23 @@ class TestBuildPayload(unittest.TestCase):
         p = build_payload(None, None, "<html></html>", b"x")
         self.assertEqual(p["title"], "")
         self.assertEqual(p["author"], "")
+
+
+class TestSizeGuard(unittest.TestCase):
+    def test_small_payload_is_within_limit(self):
+        raw = payload_bytes(build_payload("T", "A", "<html></html>", b"x"))
+        self.assertFalse(exceeds_size_limit(raw))
+
+    def test_oversize_payload_flagged(self):
+        self.assertTrue(exceeds_size_limit(b"x" * (MAX_PAYLOAD_BYTES + 1)))
+
+    def test_boundary_exactly_at_limit_is_ok(self):
+        self.assertFalse(exceeds_size_limit(b"x" * MAX_PAYLOAD_BYTES))
+
+    def test_limit_stays_under_vercel_cap(self):
+        # Vercel rejects request bodies over ~4.5 MB with HTTP 413; our
+        # client-side guard must trip below that, with headroom to spare.
+        self.assertLessEqual(MAX_PAYLOAD_BYTES, 4_500_000)
 
 
 class TestPayloadBytes(unittest.TestCase):

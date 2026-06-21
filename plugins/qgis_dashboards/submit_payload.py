@@ -17,6 +17,13 @@ import base64
 import gzip
 import json
 
+# Vercel serverless functions reject request bodies larger than ~4.5 MB with
+# HTTP 413. We refuse client-side a little under that (leaving headroom for
+# request headers / framing) so the user gets an actionable message instead of
+# an opaque server rejection. See ``exceeds_size_limit`` and the publisher's
+# preflight check.
+MAX_PAYLOAD_BYTES = 4 * 1024 * 1024  # 4 MB
+
 
 def gzip_b64(html):
     """Return base64(gzip(utf-8 *html*)) as an ASCII ``str``."""
@@ -52,3 +59,12 @@ def build_payload(title, author, html, thumb_bytes, description=None):
 def payload_bytes(payload):
     """Encode a payload dict as UTF-8 JSON bytes ready to POST."""
     return json.dumps(payload).encode("utf-8")
+
+
+def exceeds_size_limit(raw):
+    """True if *raw* (the POST body bytes) is over the gallery's request cap.
+
+    The boundary is inclusive: a body exactly at :data:`MAX_PAYLOAD_BYTES` is
+    still accepted; only strictly larger bodies are rejected.
+    """
+    return len(raw) > MAX_PAYLOAD_BYTES

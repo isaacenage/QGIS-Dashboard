@@ -75,7 +75,20 @@ def publish_dashboard(window, author, description=None, skip_layers=None,
     progress("Uploading…", 0.55)
     payload = submit_payload.build_payload(
         title, author, html, thumb_bytes, description=description)
-    result = submit_dashboard(submit_payload.payload_bytes(payload))
+    raw = submit_payload.payload_bytes(payload)
+
+    # Refuse oversize submissions before the wire so the user gets an
+    # actionable message instead of the server's opaque HTTP 413.
+    if submit_payload.exceeds_size_limit(raw):
+        size_mb = len(raw) / (1024.0 * 1024.0)
+        cap_mb = submit_payload.MAX_PAYLOAD_BYTES / (1024.0 * 1024.0)
+        raise PublishError(
+            "This dashboard is too large to publish ({:.1f} MB; the gallery "
+            "accepts up to about {:.0f} MB). Try skipping or removing large "
+            "layers, using lighter images, or splitting it into fewer pages, "
+            "then publish again.".format(size_mb, cap_mb))
+
+    result = submit_dashboard(raw)
 
     progress("Done", 1.0)
     return result

@@ -88,6 +88,12 @@ def submit_dashboard(payload_bytes, url=SUBMIT_URL):
     message = body.get("message") if isinstance(body, dict) else None
     if message:
         raise PublishError(message)
+    # 413 is a size rejection, not a transient error — retrying never helps.
+    if status == 413:
+        raise PublishError(
+            "This dashboard is too large for the gallery service. Try skipping "
+            "or removing large layers, using lighter images, or splitting it "
+            "into fewer pages, then publish again.")
     raise PublishError(
         "The gallery service rejected the submission (error {}). Please try "
         "again later.".format(status or "unknown"))
